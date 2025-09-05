@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Lab Policy Whitelist",
+  "version": "1.0",
+  "description": "Whitelist-only browsing with history logging for lab PCs.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Lab Policy Whitelist"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["blocked.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

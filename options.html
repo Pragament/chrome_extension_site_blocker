@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lab Policy - Options</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      background: rgb(246, 243, 243);
+      padding: 30px 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      width: 500px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+      color: #333;
+    }
+    textarea {
+      width: 100%;
+      height: 160px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 14px;
+      resize: none;
+      margin-bottom: 20px;
+    }
+    .button-group {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    .btn {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.3s;
+    }
+    .btn:hover {
+      background: #2980b9;
+    }
+    .btn-secondary {
+      background: #2ecc71;
+    }
+    .btn-secondary:hover {
+      background: #27ae60;
+    }
+    p {
+      color: #666;
+      font-size: 13px;
+      margin-top: 10px;
+      text-align: center;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    .info-box {
+      background: #f9f9f9;
+      border-left: 4px solid #667eea; /* Accent color */
+      padding: 10px 15px;
+      margin-bottom: 15px;
+      font-size: 14px;
+      color: #333;
+      border-radius: 6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .info-box p {
+      margin: 0 0 5px;
+      font-weight: bold;
+      color: #444;
+    }
+
+    .info-box ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .info-box li {
+      margin: 3px 0;
+}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Whitelist Manager</h1>
+    <textarea id="whitelist" placeholder="Enter allowed domains or URLs..."></textarea>
+    
+    <div class="button-group">
+      <button id="save" class="btn">Save Whitelist</button>
+      <button id="export" class="btn btn-secondary">Export Logs (CSV)</button>
+    </div>
+
+    <div class="info-box">
+      <p>Enter one rule per line. Examples:</p>
+      <ul>
+        <li><code>w3schools.com</code></li>
+        <li><code>*.example.com</code></li>
+        <li><code>https://domain.com/page/</code></li>
+    </ul>
+    </div>
+
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

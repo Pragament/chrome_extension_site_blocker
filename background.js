@@ -222,9 +222,6 @@ function isAllowed(url, whitelist) {
 
       // Prefix match (full URL starts with)
       if (url.startsWith(pattern)) return true;
-
-      // Plain domain contains
-      if (u.hostname.includes(pattern)) return true;
     }
   } catch (e) {
     console.warn("Bad URL:", url);
@@ -277,40 +274,78 @@ async function logVisit(url, title, tabId, allowed) {
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // only main-frame
 
-  // Ignore navigation to the extension's own URLs and the new tab page
-  if (details.url.startsWith(chrome.runtime.getURL('')) || details.url === "chrome://new-tab-page-third-party/") {
+  // Ignore extension pages and Chrome internal pages
+  if (details.url.startsWith(chrome.runtime.getURL('')) || 
+      details.url.startsWith('chrome://') || 
+      details.url === "about:blank") {
     return;
   }
 
-  console.log('[LabPolicy] onBeforeNavigate', details.url);
-  const { whitelist = [] } = await chrome.storage.local.get("whitelist");
-  const allowed = isAllowed(details.url, whitelist);
+  console.log('[LabPolicy] onBeforeNavigate attempt', details.url);
 
-  if (!allowed) {
-    chrome.tabs.update(details.tabId, {
-      url: chrome.runtime.getURL("blocked.html") + "?orig=" + encodeURIComponent(details.url)
-    });
-  }
-
-  chrome.tabs.get(details.tabId, (tab) => {
-    const title = tab?.title || "Untitled";
-    console.log('[LabPolicy] logging visit', { url: details.url, allowed });
-    logVisit(details.url, title, details.tabId, allowed);
-  });
+  // Optional: early log (title will be inaccurate, but URL is known early)
+  // You can log here if you want "attempted access" even if later blocked
+  // But do NOT redirect here!
 });
 
 // Fallback: also listen to tab updates when a page completes loading
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete' || !tab.url) return;
-  if (tab.url.startsWith(chrome.runtime.getURL(''))) return;
-  if (tab.url.startsWith('chrome://')) return;
+
+  // Ignore extension pages and chrome internal pages
+  if (tab.url.startsWith(chrome.runtime.getURL('')) ||
+      tab.url.startsWith('chrome://') ||
+      tab.url.startsWith('about:')) {
+    return;
+  }
+
+  console.log('[LabPolicy] tabs.onUpdated complete', tab.url);
+
   try {
-    console.log('[LabPolicy] tabs.onUpdated complete', tab.url);
     const { whitelist = [] } = await chrome.storage.local.get('whitelist');
     const allowed = isAllowed(tab.url, whitelist);
     if (!allowed) {
-      chrome.tabs.update(tabId, { url: chrome.runtime.getURL('blocked.html') + '?orig=' + encodeURIComponent(tab.url) });
+      // Redirect to blocked page
+      const blockedUrl = chrome.runtime.getURL("blocked.html") + 
+                        '?orig=' + encodeURIComponent(tab.url);
+      await chrome.tabs.update(tabId, { url: blockedUrl });
     }
-    logVisit(tab.url, tab.title || 'Untitled', tabId, allowed);
-  } catch (e) {}
+
+    // Log the final visit (accurate title and URL)
+    await logVisit(tab.url, tab.title || 'Untitled', tabId, allowed);
+
+  } catch (e) {
+    console.warn('[LabPolicy] onUpdated handler error', e);
+  }
 });
+
+// Handle client-side navigation in SPAs (History API pushState/replaceState)
+chrome.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
+  if (details.frameId !== 0) return;
+
+  try {
+    const tab = await chrome.tabs.get(details.tabId);
+    if (!tab.url || 
+        tab.url.startsWith(chrome.runtime.getURL('')) ||
+        tab.url.startsWith('chrome://') ||
+        tab.url.startsWith('about:')) {
+      return;
+    }
+
+    console.log('[LabPolicy] History state updated (SPA)', tab.url);
+
+    const { whitelist = [] } = await chrome.storage.local.get('whitelist');
+    const allowed = isAllowed(tab.url, whitelist);
+
+    if (!allowed) {
+      const blockedUrl = chrome.runtime.getURL("blocked.html") + 
+                        '?orig=' + encodeURIComponent(tab.url);
+      await chrome.tabs.update(details.tabId, { url: blockedUrl });
+    }
+
+    await logVisit(tab.url, tab.title || 'Untitled', details.tabId, allowed);
+
+  } catch (e) {
+    console.warn('[LabPolicy] onHistoryStateUpdated error', e);
+  }
+}, { url: [{ schemes: ["http", "https"] }] });

@@ -11,6 +11,10 @@
   ],
   "host_permissions": [
   "https://www.google-analytics.com/*",
+  "https://securetoken.googleapis.com/*",
+  "https://identitytoolkit.googleapis.com/*",
+  "https://firestore.googleapis.com/*",
+  "https://your-backend.com/*",
   "<all_urls>"
 ],
   "background": {

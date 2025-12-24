@@ -1,0 +1,96 @@
+#labClassFab {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  background: #1a3d5e; /* Dark blue */
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 999999;
+  user-select: none;
+  transition: transform 0.2s;
+}
+
+#labClassFab:hover {
+  transform: scale(1.1);
+}
+
+#labClassPanel {
+  position: fixed;
+  top: 90px;
+  right: 20px;
+  width: 300px;
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  z-index: 999999;
+  display: none; /* Hidden by default */
+  flex-direction: column;
+  gap: 12px;
+  color: #333;
+  font-family: Arial, sans-serif;
+}
+
+#labClassPanel.open {
+  display: flex;
+}
+
+#labClassPanel input {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+#labClassPanel button {
+  padding: 10px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+#labClassPanel button:hover {
+  background: #2980b9;
+}
+
+#labClassPanel .clear-btn {
+  background: #e74c3c;
+}
+
+#labClassPanel .clear-btn:hover {
+  background: #c0392b;
+}
+
+#labClassPanel .close-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  color: #999;
+  font-size: 20px;
+  cursor: pointer;
+}
+#labClassFab {
+  /* existing styles... */
+  font-size: 20px;        /* Bigger text */
+  font-weight: bold;
+  text-transform: uppercase; /* Makes "10A" look clean */
+  letter-spacing: 1px;
+}
+
+#labClassFab:empty::before,
+#labClassFab:not(:empty):empty::before {
+  content: '?';
+}

@@ -149,40 +149,48 @@ async function fetchClassWishlist(classCode) {
   
   try {
     const projectId = self.CONFIG.FIREBASE.projectId;
-    // Query the classes collection for documents with matching code field
-    const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/classes`;
-    
-    const res = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-    
-    if (!res.ok) {
-      console.warn('[fetchClassWishlist] Firestore read failed', res.status);
-      return [];
-    }
-    
-    const data = await res.json();
-    
-    // Find the class document with matching code
-    if (data.documents && Array.isArray(data.documents)) {
-      for (const doc of data.documents) {
-        const codeField = doc.fields?.code?.stringValue;
-        if (codeField === classCode) {
-          // Extract wishlist array
-          const wishlistField = doc.fields?.wishlist?.arrayValue?.values;
-          if (wishlistField && Array.isArray(wishlistField)) {
-            const wishlist = wishlistField.map(item => item.stringValue).filter(Boolean);
-            console.log('[fetchClassWishlist] Found wishlist for class', classCode, wishlist);
-            return wishlist;
+    // Query the classes collection for the document with the matching code field
+    const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+
+    const queryPayload = {
+      structuredQuery: {
+        from: [{ collectionId: "classes" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "code" },
+            op: "EQUAL",
+            value: { stringValue: classCode }
           }
         }
       }
+    };
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(queryPayload)
+    });
+
+    if (!res.ok) {
+      console.warn('[fetchClassWishlist] Firestore query failed', res.status);
+      return [];
     }
-    
+
+    const data = await res.json();
+
+    if (data && Array.isArray(data) && data.length > 0) {
+      const doc = data[0].document;
+      const wishlistField = doc.fields?.wishlist?.arrayValue?.values;
+      if (wishlistField && Array.isArray(wishlistField)) {
+        const wishlist = wishlistField.map(item => item.stringValue).filter(Boolean);
+        console.log('[fetchClassWishlist] Found wishlist for class', classCode, wishlist);
+        return wishlist;
+      }
+    }
+
     console.log('[fetchClassWishlist] No wishlist found for class', classCode);
     return [];
   } catch (err) {

@@ -84,6 +84,8 @@ function initFab() {
       return;
     }
     await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
+    // Clear wishlist cache to fetch new class wishlist
+    await chrome.storage.local.remove('classWishlistCache');
     updateDisplay();
     panel.classList.remove('open');
   });
@@ -92,6 +94,8 @@ function initFab() {
   document.getElementById('clearBtn').addEventListener('click', async () => {
     if (confirm('Clear class code and roll number?')) {
       await chrome.storage.local.remove('studentInfo');
+      // Clear wishlist cache when student info is cleared
+      await chrome.storage.local.remove('classWishlistCache');
       updateDisplay();
       panel.classList.remove('open');
     }

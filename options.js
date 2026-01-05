@@ -145,6 +145,8 @@ $("submitClassCode").addEventListener("click", async () => {
   if (!code) return showStudentMessage("Enter class code.", "error");
   if (!roll) return showStudentMessage("Enter roll number.", "error");
   await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
+  // Clear wishlist cache to fetch new class wishlist
+  await chrome.storage.local.remove('classWishlistCache');
   showStudentMessage("Submitted.", "success");
 });
 

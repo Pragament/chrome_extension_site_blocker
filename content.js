@@ -114,9 +114,9 @@ function initFab() {
       console.debug('[site-blocker] saving studentInfo to chrome.storage.local');
       await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
 
-      console.debug('[site-blocker] studentInfo saved, clearing classWishlistCache');
-      // Clear wishlist cache to fetch new class wishlist
-      await chrome.storage.local.remove('classWishlistCache');
+      console.debug('[site-blocker] studentInfo saved, requesting Firestore wishlist refresh');
+      const refreshResponse = await chrome.runtime.sendMessage({ type: 'refreshWishlist' });
+      console.debug('[site-blocker] refreshWishlist response received', refreshResponse);
 
       console.debug('[site-blocker] cache cleared, refreshing panel display');
       await updateDisplay();

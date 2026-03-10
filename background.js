@@ -308,6 +308,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
       if (studentInfo.classCode) {
         const wishlist = await fetchClassWishlist(studentInfo.classCode);
+        await chrome.storage.local.set({
+          classWishlistCache: {
+            classCode: studentInfo.classCode,
+            wishlist,
+            timestamp: Date.now()
+          }
+        });
         sendResponse({ success: true, wishlist, classCode: studentInfo.classCode });
       } else {
         sendResponse({ success: false, message: 'No class code set' });

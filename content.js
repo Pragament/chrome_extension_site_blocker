@@ -15,10 +15,28 @@ if (!document.body) {
 function initFab() {
   if (document.getElementById('labClassFab')) return;
 
+  function hasExtensionContext() {
+    return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
+  }
+
+  function applyFabPosition(position) {
+    const side = position === 'left' ? 'left' : 'right';
+    fab.dataset.position = side;
+    panel.dataset.position = side;
+  }
+
+  function getNextPositionLabel() {
+    return fab.dataset.position === 'left' ? 'Move to Right' : 'Move to Left';
+  }
+
   // Floating button — will show class code
   const fab = document.createElement('div');
   fab.id = 'labClassFab';
   fab.title = 'Click to change Class Code / Roll Number';
+  fab.innerHTML = `
+    <span class="fab-class">?</span>
+    <span class="fab-roll">Roll: -</span>
+  `;
   document.body.appendChild(fab);
 
   // Panel
@@ -29,10 +47,15 @@ function initFab() {
     <strong>Current: <span id="currentInfo">Loading...</span></strong>
     <input type="text" id="newCode" placeholder="Class Code (e.g. 10A)">
     <input type="text" id="newRoll" placeholder="Roll Number">
+    <button id="toggleFabPositionBtn" type="button">Move to Left</button>
     <button id="saveBtn">Update</button>
     <button id="clearBtn" class="clear-btn">Clear</button>
   `;
   document.body.appendChild(panel);
+
+  const fabClass = fab.querySelector('.fab-class');
+  const fabRoll = fab.querySelector('.fab-roll');
+  const toggleFabPositionBtn = document.getElementById('toggleFabPositionBtn');
 
   // Toggle panel
   fab.addEventListener('click', (e) => {
@@ -51,13 +74,42 @@ function initFab() {
     }
   });
 
-  async function updateDisplay() {
-    try {
-      const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
-      const classCode = studentInfo.classCode || '?'; // Show ? if not set
+  toggleFabPositionBtn.addEventListener('click', async () => {
+    if (!hasExtensionContext()) {
+      console.warn('[site-blocker] toggleFabPositionBtn aborted: extension context invalidated');
+      alert('Extension was reloaded. Refresh this page and try again.');
+      return;
+    }
 
-      // Update button text to show current class code
-      fab.textContent = classCode;
+    const nextPosition = fab.dataset.position === 'left' ? 'right' : 'left';
+    applyFabPosition(nextPosition);
+    toggleFabPositionBtn.textContent = getNextPositionLabel();
+    await chrome.storage.local.set({ labClassFabPosition: nextPosition });
+    console.debug('[site-blocker] labClassFab position updated', { nextPosition });
+  });
+
+  async function updateDisplay() {
+    if (!hasExtensionContext()) {
+      console.warn('[site-blocker] extension context unavailable during updateDisplay');
+      fabClass.textContent = '!';
+      fabRoll.textContent = 'Roll: -';
+      return;
+    }
+
+    try {
+      const { studentInfo = {}, labClassFabPosition = 'right' } = await chrome.storage.local.get([
+        'studentInfo',
+        'labClassFabPosition',
+      ]);
+      const classCode = studentInfo.classCode || '?'; // Show ? if not set
+      const rollNumber = studentInfo.rollNumber || '-';
+
+      applyFabPosition(labClassFabPosition);
+      toggleFabPositionBtn.textContent = getNextPositionLabel();
+
+      // Update button text to show current class code and roll number
+      fabClass.textContent = classCode;
+      fabRoll.textContent = `Roll: ${rollNumber}`;
 
       // Update panel info
       const display = studentInfo.classCode 
@@ -69,7 +121,8 @@ function initFab() {
       document.getElementById('newRoll').value = studentInfo.rollNumber || '';
     } catch (e) {
       console.warn('Storage error:', e);
-      fab.textContent = '!';
+      fabClass.textContent = '!';
+      fabRoll.textContent = 'Roll: -';
     }
   }
 
@@ -79,30 +132,84 @@ function initFab() {
   document.getElementById('saveBtn').addEventListener('click', async () => {
     const code = document.getElementById('newCode').value.trim();
     const roll = document.getElementById('newRoll').value.trim();
+
+    console.debug('[site-blocker] saveBtn clicked', {
+      enteredClassCode: code,
+      enteredRollNumber: roll,
+    });
+
     if (!code || !roll) {
+      console.debug('[site-blocker] saveBtn validation failed', {
+        missingClassCode: !code,
+        missingRollNumber: !roll,
+      });
       alert('Please fill both Class Code and Roll Number');
       return;
     }
-    await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-    // Clear wishlist cache to fetch new class wishlist
-    await chrome.storage.local.remove('classWishlistCache');
-    updateDisplay();
-    panel.classList.remove('open');
+
+    if (!hasExtensionContext()) {
+      console.warn('[site-blocker] saveBtn aborted: extension context invalidated');
+      alert('Extension was reloaded. Refresh this page and try again.');
+      return;
+    }
+
+    try {
+      console.debug('[site-blocker] saving studentInfo to chrome.storage.local');
+      await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
+
+      console.debug('[site-blocker] studentInfo saved, requesting Firestore wishlist refresh');
+      const refreshResponse = await chrome.runtime.sendMessage({ type: 'refreshWishlist' });
+      console.debug('[site-blocker] refreshWishlist response received', refreshResponse);
+
+      console.debug('[site-blocker] wishlist refresh completed, refreshing panel display');
+      await updateDisplay();
+
+      console.debug('[site-blocker] closing panel after save');
+      panel.classList.remove('open');
+    } catch (error) {
+      const isInvalidated = error?.message?.includes('Extension context invalidated');
+      console.warn('[site-blocker] saveBtn failed', { error, isInvalidated });
+
+      if (isInvalidated) {
+        alert('Extension was reloaded. Refresh this page and try again.');
+        return;
+      }
+
+      throw error;
+    }
   });
 
   // Clear
   document.getElementById('clearBtn').addEventListener('click', async () => {
     if (confirm('Clear class code and roll number?')) {
-      await chrome.storage.local.remove('studentInfo');
-      // Clear wishlist cache when student info is cleared
-      await chrome.storage.local.remove('classWishlistCache');
-      updateDisplay();
-      panel.classList.remove('open');
+      if (!hasExtensionContext()) {
+        console.warn('[site-blocker] clearBtn aborted: extension context invalidated');
+        alert('Extension was reloaded. Refresh this page and try again.');
+        return;
+      }
+
+      try {
+        await chrome.storage.local.remove('studentInfo');
+        // Clear wishlist cache when student info is cleared
+        await chrome.storage.local.remove('classWishlistCache');
+        await updateDisplay();
+        panel.classList.remove('open');
+      } catch (error) {
+        const isInvalidated = error?.message?.includes('Extension context invalidated');
+        console.warn('[site-blocker] clearBtn failed', { error, isInvalidated });
+
+        if (isInvalidated) {
+          alert('Extension was reloaded. Refresh this page and try again.');
+          return;
+        }
+
+        throw error;
+      }
     }
   });
 
   // Auto-update button if changed from options page
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo) updateDisplay();
+    if (changes.studentInfo || changes.labClassFabPosition) updateDisplay();
   });
 }

@@ -21,6 +21,32 @@ function normalizeLines(text) {
     .filter(l => l.length > 0);
 }
 
+async function loadWhitelistTextarea() {
+  const { whitelist = [], classWishlistCache = null, studentInfo = {} } = await chrome.storage.local.get([
+    "whitelist",
+    "classWishlistCache",
+    "studentInfo"
+  ]);
+
+  let lines = whitelist;
+  const hasFetchedWishlist = classWishlistCache &&
+    classWishlistCache.classCode === studentInfo.classCode &&
+    Array.isArray(classWishlistCache.wishlist) &&
+    classWishlistCache.wishlist.length > 0;
+
+  if (hasFetchedWishlist) {
+    lines = classWishlistCache.wishlist;
+  }
+
+  if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
+    const set = new Set(lines);
+    self.CONFIG.REQUIRED_RULES.forEach(r => set.add(r));
+    lines = Array.from(set);
+  }
+
+  $("whitelist").value = lines.join("\n");
+}
+
 // Initialize on page load
 document.addEventListener("DOMContentLoaded", async () => {
   await initializePassword();
@@ -61,16 +87,8 @@ function showLoginScreen() {
 async function showMainScreen() {
   setHidden($("loginScreen"), true);
   setHidden($("mainScreen"), false);
-  
-  // Load whitelist
-  let { whitelist = [] } = await chrome.storage.local.get("whitelist");
-  // Show required rules in the UI as well
-  if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
-    const set = new Set(whitelist);
-    self.CONFIG.REQUIRED_RULES.forEach(r => set.add(r));
-    whitelist = Array.from(set);
-  }
-  $("whitelist").value = whitelist.join("\n");
+
+  await loadWhitelistTextarea();
   
   // Always show the password section (no longer hiding it)
   showPasswordChangeSection();
@@ -145,8 +163,8 @@ $("submitClassCode").addEventListener("click", async () => {
   if (!code) return showStudentMessage("Enter class code.", "error");
   if (!roll) return showStudentMessage("Enter roll number.", "error");
   await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-  // Clear wishlist cache to fetch new class wishlist
-  await chrome.storage.local.remove('classWishlistCache');
+  await chrome.runtime.sendMessage({ type: "refreshWishlist" });
+  await loadWhitelistTextarea();
   showStudentMessage("Submitted.", "success");
 });
 
@@ -240,6 +258,7 @@ $("save").addEventListener("click", async () => {
   }
 
   await chrome.storage.local.set({ whitelist: lines });
+  await loadWhitelistTextarea();
   
   if (lines.length === 0) {
     showWhitelistMessage("⚠️ Whitelist cleared! All websites will be blocked.", "success");

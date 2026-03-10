@@ -19,10 +19,24 @@ function initFab() {
     return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   }
 
+  function applyFabPosition(position) {
+    const side = position === 'left' ? 'left' : 'right';
+    fab.dataset.position = side;
+    panel.dataset.position = side;
+  }
+
+  function getNextPositionLabel() {
+    return fab.dataset.position === 'left' ? 'Move to Right' : 'Move to Left';
+  }
+
   // Floating button — will show class code
   const fab = document.createElement('div');
   fab.id = 'labClassFab';
   fab.title = 'Click to change Class Code / Roll Number';
+  fab.innerHTML = `
+    <span class="fab-class">?</span>
+    <span class="fab-roll">Roll: -</span>
+  `;
   document.body.appendChild(fab);
 
   // Panel
@@ -33,10 +47,15 @@ function initFab() {
     <strong>Current: <span id="currentInfo">Loading...</span></strong>
     <input type="text" id="newCode" placeholder="Class Code (e.g. 10A)">
     <input type="text" id="newRoll" placeholder="Roll Number">
+    <button id="toggleFabPositionBtn" type="button">Move to Left</button>
     <button id="saveBtn">Update</button>
     <button id="clearBtn" class="clear-btn">Clear</button>
   `;
   document.body.appendChild(panel);
+
+  const fabClass = fab.querySelector('.fab-class');
+  const fabRoll = fab.querySelector('.fab-roll');
+  const toggleFabPositionBtn = document.getElementById('toggleFabPositionBtn');
 
   // Toggle panel
   fab.addEventListener('click', (e) => {
@@ -55,19 +74,42 @@ function initFab() {
     }
   });
 
+  toggleFabPositionBtn.addEventListener('click', async () => {
+    if (!hasExtensionContext()) {
+      console.warn('[site-blocker] toggleFabPositionBtn aborted: extension context invalidated');
+      alert('Extension was reloaded. Refresh this page and try again.');
+      return;
+    }
+
+    const nextPosition = fab.dataset.position === 'left' ? 'right' : 'left';
+    applyFabPosition(nextPosition);
+    toggleFabPositionBtn.textContent = getNextPositionLabel();
+    await chrome.storage.local.set({ labClassFabPosition: nextPosition });
+    console.debug('[site-blocker] labClassFab position updated', { nextPosition });
+  });
+
   async function updateDisplay() {
     if (!hasExtensionContext()) {
       console.warn('[site-blocker] extension context unavailable during updateDisplay');
-      fab.textContent = '!';
+      fabClass.textContent = '!';
+      fabRoll.textContent = 'Roll: -';
       return;
     }
 
     try {
-      const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
+      const { studentInfo = {}, labClassFabPosition = 'right' } = await chrome.storage.local.get([
+        'studentInfo',
+        'labClassFabPosition',
+      ]);
       const classCode = studentInfo.classCode || '?'; // Show ? if not set
+      const rollNumber = studentInfo.rollNumber || '-';
 
-      // Update button text to show current class code
-      fab.textContent = classCode;
+      applyFabPosition(labClassFabPosition);
+      toggleFabPositionBtn.textContent = getNextPositionLabel();
+
+      // Update button text to show current class code and roll number
+      fabClass.textContent = classCode;
+      fabRoll.textContent = `Roll: ${rollNumber}`;
 
       // Update panel info
       const display = studentInfo.classCode 
@@ -79,7 +121,8 @@ function initFab() {
       document.getElementById('newRoll').value = studentInfo.rollNumber || '';
     } catch (e) {
       console.warn('Storage error:', e);
-      fab.textContent = '!';
+      fabClass.textContent = '!';
+      fabRoll.textContent = 'Roll: -';
     }
   }
 
@@ -118,7 +161,7 @@ function initFab() {
       const refreshResponse = await chrome.runtime.sendMessage({ type: 'refreshWishlist' });
       console.debug('[site-blocker] refreshWishlist response received', refreshResponse);
 
-      console.debug('[site-blocker] cache cleared, refreshing panel display');
+      console.debug('[site-blocker] wishlist refresh completed, refreshing panel display');
       await updateDisplay();
 
       console.debug('[site-blocker] closing panel after save');
@@ -167,6 +210,6 @@ function initFab() {
 
   // Auto-update button if changed from options page
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo) updateDisplay();
+    if (changes.studentInfo || changes.labClassFabPosition) updateDisplay();
   });
 }

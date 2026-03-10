@@ -2,25 +2,55 @@
   position: fixed;
   top: 20px;
   right: 20px;
-  width: 60px;
-  height: 60px;
-  background: #1a3d5e; /* Dark blue */
-  color: white;
-  border-radius: 50%;
+  min-width: 108px;
+  min-height: 58px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #16324a;
+  border: 1px solid rgba(22, 50, 74, 0.28);
+  border-radius: 16px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: center;
-  font-size: 28px;
-  font-weight: bold;
+  gap: 3px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   z-index: 999999;
   user-select: none;
-  transition: transform 0.2s;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#labClassFab[data-position="left"] {
+  left: 20px;
+  right: auto;
+}
+
+#labClassFab[data-position="right"] {
+  left: auto;
+  right: 20px;
 }
 
 #labClassFab:hover {
-  transform: scale(1.1);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.18);
+}
+
+#labClassFab .fab-class {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+#labClassFab .fab-roll {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
+  opacity: 0.85;
 }
 
 #labClassPanel {
@@ -33,11 +63,21 @@
   padding: 20px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.2);
   z-index: 999999;
-  display: none; /* Hidden by default */
+  display: none;
   flex-direction: column;
   gap: 12px;
   color: #333;
   font-family: Arial, sans-serif;
+}
+
+#labClassPanel[data-position="left"] {
+  left: 20px;
+  right: auto;
+}
+
+#labClassPanel[data-position="right"] {
+  left: auto;
+  right: 20px;
 }
 
 #labClassPanel.open {
@@ -81,16 +121,4 @@
   color: #999;
   font-size: 20px;
   cursor: pointer;
-}
-#labClassFab {
-  /* existing styles... */
-  font-size: 20px;        /* Bigger text */
-  font-weight: bold;
-  text-transform: uppercase; /* Makes "10A" look clean */
-  letter-spacing: 1px;
-}
-
-#labClassFab:empty::before,
-#labClassFab:not(:empty):empty::before {
-  content: '?';
 }

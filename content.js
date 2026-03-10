@@ -15,6 +15,10 @@ if (!document.body) {
 function initFab() {
   if (document.getElementById('labClassFab')) return;
 
+  function hasExtensionContext() {
+    return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
+  }
+
   // Floating button — will show class code
   const fab = document.createElement('div');
   fab.id = 'labClassFab';
@@ -52,6 +56,12 @@ function initFab() {
   });
 
   async function updateDisplay() {
+    if (!hasExtensionContext()) {
+      console.warn('[site-blocker] extension context unavailable during updateDisplay');
+      fab.textContent = '!';
+      return;
+    }
+
     try {
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
       const classCode = studentInfo.classCode || '?'; // Show ? if not set
@@ -79,25 +89,79 @@ function initFab() {
   document.getElementById('saveBtn').addEventListener('click', async () => {
     const code = document.getElementById('newCode').value.trim();
     const roll = document.getElementById('newRoll').value.trim();
+
+    console.debug('[site-blocker] saveBtn clicked', {
+      enteredClassCode: code,
+      enteredRollNumber: roll,
+    });
+
     if (!code || !roll) {
+      console.debug('[site-blocker] saveBtn validation failed', {
+        missingClassCode: !code,
+        missingRollNumber: !roll,
+      });
       alert('Please fill both Class Code and Roll Number');
       return;
     }
-    await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-    // Clear wishlist cache to fetch new class wishlist
-    await chrome.storage.local.remove('classWishlistCache');
-    updateDisplay();
-    panel.classList.remove('open');
+
+    if (!hasExtensionContext()) {
+      console.warn('[site-blocker] saveBtn aborted: extension context invalidated');
+      alert('Extension was reloaded. Refresh this page and try again.');
+      return;
+    }
+
+    try {
+      console.debug('[site-blocker] saving studentInfo to chrome.storage.local');
+      await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
+
+      console.debug('[site-blocker] studentInfo saved, clearing classWishlistCache');
+      // Clear wishlist cache to fetch new class wishlist
+      await chrome.storage.local.remove('classWishlistCache');
+
+      console.debug('[site-blocker] cache cleared, refreshing panel display');
+      await updateDisplay();
+
+      console.debug('[site-blocker] closing panel after save');
+      panel.classList.remove('open');
+    } catch (error) {
+      const isInvalidated = error?.message?.includes('Extension context invalidated');
+      console.warn('[site-blocker] saveBtn failed', { error, isInvalidated });
+
+      if (isInvalidated) {
+        alert('Extension was reloaded. Refresh this page and try again.');
+        return;
+      }
+
+      throw error;
+    }
   });
 
   // Clear
   document.getElementById('clearBtn').addEventListener('click', async () => {
     if (confirm('Clear class code and roll number?')) {
-      await chrome.storage.local.remove('studentInfo');
-      // Clear wishlist cache when student info is cleared
-      await chrome.storage.local.remove('classWishlistCache');
-      updateDisplay();
-      panel.classList.remove('open');
+      if (!hasExtensionContext()) {
+        console.warn('[site-blocker] clearBtn aborted: extension context invalidated');
+        alert('Extension was reloaded. Refresh this page and try again.');
+        return;
+      }
+
+      try {
+        await chrome.storage.local.remove('studentInfo');
+        // Clear wishlist cache when student info is cleared
+        await chrome.storage.local.remove('classWishlistCache');
+        await updateDisplay();
+        panel.classList.remove('open');
+      } catch (error) {
+        const isInvalidated = error?.message?.includes('Extension context invalidated');
+        console.warn('[site-blocker] clearBtn failed', { error, isInvalidated });
+
+        if (isInvalidated) {
+          alert('Extension was reloaded. Refresh this page and try again.');
+          return;
+        }
+
+        throw error;
+      }
     }
   });
 

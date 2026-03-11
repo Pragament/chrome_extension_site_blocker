@@ -55,6 +55,9 @@ function initFab() {
 
   const fabClass = fab.querySelector('.fab-class');
   const fabRoll = fab.querySelector('.fab-roll');
+  const newCodeInput = document.getElementById('newCode');
+  const newRollInput = document.getElementById('newRoll');
+  const saveBtn = document.getElementById('saveBtn');
   const toggleFabPositionBtn = document.getElementById('toggleFabPositionBtn');
 
   // Toggle panel
@@ -72,6 +75,14 @@ function initFab() {
     if (!fab.contains(e.target) && !panel.contains(e.target)) {
       panel.classList.remove('open');
     }
+  });
+
+  [newCodeInput, newRollInput].forEach((input) => {
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      saveBtn.click();
+    });
   });
 
   toggleFabPositionBtn.addEventListener('click', async () => {
@@ -117,8 +128,8 @@ function initFab() {
         : 'Not set';
 
       document.getElementById('currentInfo').textContent = display;
-      document.getElementById('newCode').value = studentInfo.classCode || '';
-      document.getElementById('newRoll').value = studentInfo.rollNumber || '';
+      newCodeInput.value = studentInfo.classCode || '';
+      newRollInput.value = studentInfo.rollNumber || '';
     } catch (e) {
       console.warn('Storage error:', e);
       fabClass.textContent = '!';
@@ -129,9 +140,9 @@ function initFab() {
   updateDisplay();
 
   // Save
-  document.getElementById('saveBtn').addEventListener('click', async () => {
-    const code = document.getElementById('newCode').value.trim();
-    const roll = document.getElementById('newRoll').value.trim();
+  saveBtn.addEventListener('click', async () => {
+    const code = newCodeInput.value.trim();
+    const roll = newRollInput.value.trim();
 
     console.debug('[site-blocker] saveBtn clicked', {
       enteredClassCode: code,

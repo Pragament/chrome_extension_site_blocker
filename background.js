@@ -7,6 +7,20 @@ const MAX_LOGS = 10000;
 const HEARTBEAT_MINUTES = (self.CONFIG && self.CONFIG.HEARTBEAT_MINUTES) || 1;
 const BACKEND_BASE = (self.CONFIG && self.CONFIG.BACKEND_BASE) || "https://your-backend.com"; // TODO
 
+function withRequiredRules(lines = []) {
+  const normalized = Array.isArray(lines)
+    ? lines.map(line => String(line || '').trim()).filter(Boolean)
+    : [];
+
+  if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
+    const set = new Set(normalized);
+    self.CONFIG.REQUIRED_RULES.forEach(rule => set.add(rule));
+    return Array.from(set);
+  }
+
+  return Array.from(new Set(normalized));
+}
+
 // Generate or fetch persistent device ID
 async function getOrCreateDeviceId() {
   const { deviceId } = await chrome.storage.local.get("deviceId");
@@ -241,8 +255,8 @@ async function getCombinedWhitelist() {
       });
     }
   }
-  
-  return combined;
+
+  return Array.from(new Set(combined));
 }
 
 async function postJSON(path, data) {
@@ -321,6 +335,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         await chrome.storage.local.set({
+          whitelist: withRequiredRules(wishlist),
           classWishlistCache: {
             classCode,
             wishlist,

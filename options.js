@@ -63,6 +63,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
+chrome.storage.onChanged.addListener((changes) => {
+  if (!document.getElementById("mainScreen") || $("mainScreen").classList.contains("hidden")) return;
+
+  if (changes.whitelist || changes.classWishlistCache || changes.studentInfo) {
+    loadWhitelistTextarea();
+  }
+});
+
 // Initialize default password if not set
 async function initializePassword() {
   const { adminPassword } = await chrome.storage.local.get("adminPassword");

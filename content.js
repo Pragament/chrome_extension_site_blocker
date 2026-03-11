@@ -47,9 +47,9 @@ function initFab() {
     <strong>Current: <span id="currentInfo">Loading...</span></strong>
     <input type="text" id="newCode" placeholder="Class Code (e.g. 10A)">
     <input type="text" id="newRoll" placeholder="Roll Number">
-    <button id="toggleFabPositionBtn" type="button">Move to Left</button>
     <button id="saveBtn">Update</button>
     <button id="clearBtn" class="clear-btn">Clear</button>
+    <button id="toggleFabPositionBtn" type="button">Move to Left</button>
   `;
   document.body.appendChild(panel);
 

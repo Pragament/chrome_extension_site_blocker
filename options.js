@@ -1,8 +1,7 @@
 // =========================
 // Constants
 // =========================
-const DEFAULT_PASSWORD = "1234";
-const ADMIN_DASHBOARD_URL = "https://your-backend.com/admin"; // TODO: replace
+const ADMIN_DASHBOARD_URL = (self.CONFIG && self.CONFIG.ADMIN_DASHBOARD_URL) || "";
 
 // =========================
 // DOM Utilities
@@ -47,6 +46,13 @@ async function loadWhitelistTextarea() {
   $("whitelist").value = lines.join("\n");
 }
 
+async function loadPcCodeInput() {
+  const { pcCode = "" } = await chrome.storage.local.get("pcCode");
+  if ($("adminPcCode")) {
+    $("adminPcCode").value = pcCode;
+  }
+}
+
 // Initialize on page load
 document.addEventListener("DOMContentLoaded", async () => {
   await initializePassword();
@@ -60,6 +66,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     setHidden($("setupScreen"), false);
     setHidden($("roleScreen"), true);
     setHidden($("loginScreen"), true);
+  }
+});
+
+chrome.storage.onChanged.addListener((changes) => {
+  if (!document.getElementById("mainScreen") || $("mainScreen").classList.contains("hidden")) return;
+
+  if (changes.whitelist || changes.classWishlistCache || changes.studentInfo) {
+    loadWhitelistTextarea();
   }
 });
 
@@ -89,6 +103,7 @@ async function showMainScreen() {
   setHidden($("mainScreen"), false);
 
   await loadWhitelistTextarea();
+  await loadPcCodeInput();
   
   // Always show the password section (no longer hiding it)
   showPasswordChangeSection();
@@ -125,7 +140,7 @@ $("logoutBtn").addEventListener("click", async () => {
 
 // Setup screen handler
 $("completeSetup").addEventListener("click", async () => {
-  const pcCode = $("pcCode").value.trim();
+  const pcCode = $("setupPcCode").value.trim();
   const pw = $("setupPassword").value;
   const pw2 = $("setupConfirm").value;
   if (pcCode.length < 2) return showSetupMessage("Enter a PC code (min 2 chars).", "error");
@@ -162,10 +177,24 @@ $("submitClassCode").addEventListener("click", async () => {
   const roll = $("rollNumber").value.trim();
   if (!code) return showStudentMessage("Enter class code.", "error");
   if (!roll) return showStudentMessage("Enter roll number.", "error");
+  const refreshResponse = await chrome.runtime.sendMessage({ type: "refreshWishlist", classCode: code });
+  if (!refreshResponse?.success) {
+    return showStudentMessage(refreshResponse?.message || "Class code was not found in Firestore.", "error");
+  }
   await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-  await chrome.runtime.sendMessage({ type: "refreshWishlist" });
   await loadWhitelistTextarea();
   showStudentMessage("Submitted.", "success");
+});
+
+$("savePcCode").addEventListener("click", async () => {
+  const pcCode = $("adminPcCode").value.trim();
+  if (pcCode.length < 2) {
+    return showPcCodeMessage("Enter a PC code (min 2 chars).", "error");
+  }
+
+  await chrome.storage.local.set({ pcCode });
+  showPcCodeMessage("PC code updated successfully.", "success");
+  await refreshDeviceStatus();
 });
 
 // Toggle password form visibility
@@ -206,7 +235,12 @@ $("copyDeviceId").addEventListener("click", async () => {
 
 // Open admin dashboard (hosted page you provide)
 $("openAdmin").addEventListener("click", async () => {
-  const adminUrl = ADMIN_DASHBOARD_URL; // TODO replace
+  const adminUrl = ADMIN_DASHBOARD_URL;
+  if (!adminUrl || /your-backend\.com/.test(adminUrl)) {
+    showPcCodeMessage("Set CONFIG.ADMIN_DASHBOARD_URL before using the admin dashboard.", "error");
+    return;
+  }
+
   const { id } = await chrome.runtime.sendMessage({ type: "getDeviceStatus" }) || {};
   const url = id ? `${adminUrl}?id=${encodeURIComponent(id)}` : adminUrl;
   window.open(url, "_blank");
@@ -217,10 +251,10 @@ $("changePasswordBtn").addEventListener("click", async () => {
   const currentPassword = $("currentPassword").value;
   const newPassword = $("newPassword").value;
   const confirmPassword = $("confirmPassword").value;
-  
-  const { adminPassword } = await chrome.storage.local.get("adminPassword");
-  
-  if (currentPassword !== adminPassword) {
+
+  const { adminPasswordHash, adminSalt } = await chrome.storage.local.get(["adminPasswordHash", "adminSalt"]);
+  const ok = await verifyPassword(currentPassword, adminSalt, adminPasswordHash);
+  if (!ok) {
     showPasswordMessage("Current password is incorrect.", "error");
     return;
   }
@@ -235,10 +269,12 @@ $("changePasswordBtn").addEventListener("click", async () => {
     return;
   }
   
-  await chrome.storage.local.set({ adminPassword: newPassword });
-  
-  // Mark that password has been changed from default
-  await chrome.storage.local.set({ passwordChangedFromDefault: true });
+  const { salt, digestHex } = await hashPassword(newPassword);
+  await chrome.storage.local.set({
+    adminPasswordHash: digestHex,
+    adminSalt: salt,
+    passwordChangedFromDefault: true
+  });
   
   showPasswordMessage("Password changed successfully!", "success");
   clearPasswordForm();
@@ -339,6 +375,14 @@ function showWhitelistMessage(message, type) {
   setTimeout(() => {
     setHidden(messageDiv, true);
   }, 4000); // Show a bit longer for whitelist messages
+}
+
+function showPcCodeMessage(message, type) {
+  const el = $("pcCodeMessage");
+  setText(el, message);
+  el.className = type === "error" ? "error-message" : "success-message";
+  setHidden(el, false);
+  setTimeout(() => setHidden(el, true), 3000);
 }
 
 async function refreshDeviceStatus() {

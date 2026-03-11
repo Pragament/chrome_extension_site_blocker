@@ -248,7 +248,7 @@
   <!-- Setup Screen (first run) -->
   <div id="setupScreen" class="container hidden">
     <h1>First-time Setup</h1>
-    <input type="text" id="pcCode" placeholder="PC code / name (e.g., Lab-PC-12)">
+    <input type="text" id="setupPcCode" placeholder="PC code / name (e.g., Lab-PC-12)">
     <input type="password" id="setupPassword" placeholder="Admin password">
     <input type="password" id="setupConfirm" placeholder="Confirm admin password">
     <div class="button-group">
@@ -313,6 +313,15 @@
         <button id="openAdmin" class="btn">Open Admin Dashboard</button>
       </div>
       <div id="deviceMessage" class="hidden"></div>
+    </div>
+
+    <div class="info-box">
+      <p>PC Code</p>
+      <input type="text" id="adminPcCode" placeholder="PC code / name (e.g., Lab-PC-12)">
+      <div class="button-group" style="margin-top:10px;">
+        <button id="savePcCode" class="btn">Save PC Code</button>
+      </div>
+      <div id="pcCodeMessage" class="hidden"></div>
     </div>
 
     <!-- Whitelist Management -->

@@ -5,7 +5,29 @@ try { importScripts('config.js'); } catch (e) {}
 const MAX_LOGS = 10000;
 // Load CONFIG if available (from config.js)
 const HEARTBEAT_MINUTES = (self.CONFIG && self.CONFIG.HEARTBEAT_MINUTES) || 1;
-const BACKEND_BASE = (self.CONFIG && self.CONFIG.BACKEND_BASE) || "https://your-backend.com"; // TODO
+const BACKEND_BASE = (self.CONFIG && self.CONFIG.BACKEND_BASE) || "";
+
+function isPlaceholderValue(value) {
+  return !value || /your-backend\.com|G-XXXXXXXXXX|ABCDEFGHIJKLMNOPQRSTUVWXYZ/.test(String(value));
+}
+
+function getConfiguredBackendBase() {
+  return isPlaceholderValue(BACKEND_BASE) ? "" : BACKEND_BASE;
+}
+
+function withRequiredRules(lines = []) {
+  const normalized = Array.isArray(lines)
+    ? lines.map(line => String(line || '').trim()).filter(Boolean)
+    : [];
+
+  if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
+    const set = new Set(normalized);
+    self.CONFIG.REQUIRED_RULES.forEach(rule => set.add(rule));
+    return Array.from(set);
+  }
+
+  return Array.from(new Set(normalized));
+}
 
 // Generate or fetch persistent device ID
 async function getOrCreateDeviceId() {
@@ -27,7 +49,7 @@ async function sendToGA(eventName, eventParams = {}) {
   try {
     if (!self.CONFIG || !self.CONFIG.GA4) return false;
     const { measurement_id, api_secret } = self.CONFIG.GA4;
-    if (!measurement_id || !api_secret) return false;
+    if (isPlaceholderValue(measurement_id) || isPlaceholderValue(api_secret)) return false;
 
     // client_id: use deviceId (persistent) or generate fallback
     const deviceId = await getOrCreateDeviceId(); // you already have this helper
@@ -118,6 +140,7 @@ async function writeLogToFirestore(payload) {
       rollNumber: { stringValue: String(payload.rollNumber || '') },
       pcCode: { stringValue: String(payload.pcCode || '') },
       deviceId: { stringValue: String(payload.deviceId || '') },
+      prompt: { stringValue: String(payload.prompt || '') },
       ts: { timestampValue: new Date(payload.ts || Date.now()).toISOString() }
     }
   };
@@ -241,13 +264,15 @@ async function getCombinedWhitelist() {
       });
     }
   }
-  
-  return combined;
+
+  return Array.from(new Set(combined));
 }
 
 async function postJSON(path, data) {
+  const backendBase = getConfiguredBackendBase();
+  if (!backendBase) return false;
   try {
-    const res = await fetch(`${BACKEND_BASE}${path}`, {
+    const res = await fetch(`${backendBase}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -264,11 +289,16 @@ async function postJSON(path, data) {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[LabPolicy] service worker installed');
   const id = await getOrCreateDeviceId();
-  await postJSON("/install", { id, ts: Date.now() });
+  const backendBase = getConfiguredBackendBase();
+  if (backendBase) {
+    await postJSON("/install", { id, ts: Date.now() });
+  }
 
   // Set uninstall callback URL
   try {
-    chrome.runtime.setUninstallURL(`${BACKEND_BASE}/uninstalled?id=${encodeURIComponent(id)}`);
+    if (backendBase) {
+      chrome.runtime.setUninstallURL(`${backendBase}/uninstalled?id=${encodeURIComponent(id)}`);
+    }
   } catch (e) {}
 
   // Create repeating heartbeat alarm
@@ -305,20 +335,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message && message.type === "refreshWishlist") {
       // Clear cache to force refresh
       await chrome.storage.local.remove('classWishlistCache');
+      const requestedClassCode = String(message.classCode || '').trim();
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
-      if (studentInfo.classCode) {
-        const wishlist = await fetchClassWishlist(studentInfo.classCode);
+      const classCode = requestedClassCode || studentInfo.classCode || '';
+
+      if (classCode) {
+        const wishlist = await fetchClassWishlist(classCode);
+        if (!wishlist.length) {
+          sendResponse({
+            success: false,
+            message: `Class code "${classCode}" was not found in Firestore.`,
+            classCode
+          });
+          return;
+        }
+
         await chrome.storage.local.set({
+          whitelist: withRequiredRules(wishlist),
           classWishlistCache: {
-            classCode: studentInfo.classCode,
+            classCode,
             wishlist,
             timestamp: Date.now()
           }
         });
-        sendResponse({ success: true, wishlist, classCode: studentInfo.classCode });
+        sendResponse({ success: true, wishlist, classCode });
       } else {
         sendResponse({ success: false, message: 'No class code set' });
       }
+    } else if (message && message.type === "logChatGptPrompt") {
+      const prompt = String(message.prompt || '').trim();
+      if (!prompt) {
+        console.log('[site-blocker] logChatGptPrompt skipped: empty prompt');
+        sendResponse({ success: false, message: 'No prompt provided' });
+        return;
+      }
+
+      console.log('[site-blocker] logChatGptPrompt received', { prompt });
+      const deviceId = await getOrCreateDeviceId();
+      const { pcCode = '' } = await chrome.storage.local.get('pcCode');
+      const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
+
+      await writeLogToFirestore({
+        url: 'https://chatgpt.com/',
+        title: 'ChatGPT Prompt',
+        allowed: true,
+        classCode: studentInfo.classCode || '',
+        rollNumber: studentInfo.rollNumber || '',
+        pcCode,
+        deviceId,
+        prompt,
+        ts: Date.now()
+      });
+
+      console.log('[site-blocker] logChatGptPrompt Firestore write requested');
+      sendResponse({ success: true });
     } else {
       sendResponse(undefined);
     }

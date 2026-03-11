@@ -4,10 +4,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const orig = params.get("orig");
   if (orig) {
     const el = document.getElementById("orig");
-    el.innerHTML =
-      "<strong>Attempted URL:</strong><br/><span class='url'>" +
-      decodeURIComponent(orig) +
-      "</span>";
+    const decodedUrl = decodeURIComponent(orig);
+    const label = document.createElement("strong");
+    label.textContent = "Attempted URL:";
+    const link = document.createElement("a");
+    link.className = "url";
+    link.href = decodedUrl;
+    link.textContent = decodedUrl;
+    link.target = "_self";
+
+    el.replaceChildren(label, document.createElement("br"), link);
   }
   document.getElementById("goBack").addEventListener("click", () => {
     history.back();

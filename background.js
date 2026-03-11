@@ -5,7 +5,15 @@ try { importScripts('config.js'); } catch (e) {}
 const MAX_LOGS = 10000;
 // Load CONFIG if available (from config.js)
 const HEARTBEAT_MINUTES = (self.CONFIG && self.CONFIG.HEARTBEAT_MINUTES) || 1;
-const BACKEND_BASE = (self.CONFIG && self.CONFIG.BACKEND_BASE) || "https://your-backend.com"; // TODO
+const BACKEND_BASE = (self.CONFIG && self.CONFIG.BACKEND_BASE) || "";
+
+function isPlaceholderValue(value) {
+  return !value || /your-backend\.com|G-XXXXXXXXXX|ABCDEFGHIJKLMNOPQRSTUVWXYZ/.test(String(value));
+}
+
+function getConfiguredBackendBase() {
+  return isPlaceholderValue(BACKEND_BASE) ? "" : BACKEND_BASE;
+}
 
 function withRequiredRules(lines = []) {
   const normalized = Array.isArray(lines)
@@ -41,7 +49,7 @@ async function sendToGA(eventName, eventParams = {}) {
   try {
     if (!self.CONFIG || !self.CONFIG.GA4) return false;
     const { measurement_id, api_secret } = self.CONFIG.GA4;
-    if (!measurement_id || !api_secret) return false;
+    if (isPlaceholderValue(measurement_id) || isPlaceholderValue(api_secret)) return false;
 
     // client_id: use deviceId (persistent) or generate fallback
     const deviceId = await getOrCreateDeviceId(); // you already have this helper
@@ -261,8 +269,10 @@ async function getCombinedWhitelist() {
 }
 
 async function postJSON(path, data) {
+  const backendBase = getConfiguredBackendBase();
+  if (!backendBase) return false;
   try {
-    const res = await fetch(`${BACKEND_BASE}${path}`, {
+    const res = await fetch(`${backendBase}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -279,11 +289,16 @@ async function postJSON(path, data) {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[LabPolicy] service worker installed');
   const id = await getOrCreateDeviceId();
-  await postJSON("/install", { id, ts: Date.now() });
+  const backendBase = getConfiguredBackendBase();
+  if (backendBase) {
+    await postJSON("/install", { id, ts: Date.now() });
+  }
 
   // Set uninstall callback URL
   try {
-    chrome.runtime.setUninstallURL(`${BACKEND_BASE}/uninstalled?id=${encodeURIComponent(id)}`);
+    if (backendBase) {
+      chrome.runtime.setUninstallURL(`${backendBase}/uninstalled?id=${encodeURIComponent(id)}`);
+    }
   } catch (e) {}
 
   // Create repeating heartbeat alarm

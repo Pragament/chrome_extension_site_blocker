@@ -47,6 +47,13 @@ async function loadWhitelistTextarea() {
   $("whitelist").value = lines.join("\n");
 }
 
+async function loadPcCodeInput() {
+  const { pcCode = "" } = await chrome.storage.local.get("pcCode");
+  if ($("adminPcCode")) {
+    $("adminPcCode").value = pcCode;
+  }
+}
+
 // Initialize on page load
 document.addEventListener("DOMContentLoaded", async () => {
   await initializePassword();
@@ -97,6 +104,7 @@ async function showMainScreen() {
   setHidden($("mainScreen"), false);
 
   await loadWhitelistTextarea();
+  await loadPcCodeInput();
   
   // Always show the password section (no longer hiding it)
   showPasswordChangeSection();
@@ -133,7 +141,7 @@ $("logoutBtn").addEventListener("click", async () => {
 
 // Setup screen handler
 $("completeSetup").addEventListener("click", async () => {
-  const pcCode = $("pcCode").value.trim();
+  const pcCode = $("setupPcCode").value.trim();
   const pw = $("setupPassword").value;
   const pw2 = $("setupConfirm").value;
   if (pcCode.length < 2) return showSetupMessage("Enter a PC code (min 2 chars).", "error");
@@ -177,6 +185,17 @@ $("submitClassCode").addEventListener("click", async () => {
   await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
   await loadWhitelistTextarea();
   showStudentMessage("Submitted.", "success");
+});
+
+$("savePcCode").addEventListener("click", async () => {
+  const pcCode = $("adminPcCode").value.trim();
+  if (pcCode.length < 2) {
+    return showPcCodeMessage("Enter a PC code (min 2 chars).", "error");
+  }
+
+  await chrome.storage.local.set({ pcCode });
+  showPcCodeMessage("PC code updated successfully.", "success");
+  await refreshDeviceStatus();
 });
 
 // Toggle password form visibility
@@ -350,6 +369,14 @@ function showWhitelistMessage(message, type) {
   setTimeout(() => {
     setHidden(messageDiv, true);
   }, 4000); // Show a bit longer for whitelist messages
+}
+
+function showPcCodeMessage(message, type) {
+  const el = $("pcCodeMessage");
+  setText(el, message);
+  el.className = type === "error" ? "error-message" : "success-message";
+  setHidden(el, false);
+  setTimeout(() => setHidden(el, true), 3000);
 }
 
 async function refreshDeviceStatus() {

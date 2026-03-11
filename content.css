@@ -54,6 +54,13 @@
   opacity: 0.45;
 }
 
+#labClassFab .fab-pc {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
+  opacity: 0.45;
+}
+
 @keyframes labClassFabBlink {
   0%,
   100% {

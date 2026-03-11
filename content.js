@@ -38,6 +38,7 @@ function initFab() {
   fab.innerHTML = `
     <span class="fab-class">?</span>
     <span class="fab-roll">Roll: -</span>
+    <span class="fab-pc">PC: -</span>
   `;
   document.body.appendChild(fab);
 
@@ -57,6 +58,7 @@ function initFab() {
 
   const fabClass = fab.querySelector('.fab-class');
   const fabRoll = fab.querySelector('.fab-roll');
+  const fabPc = fab.querySelector('.fab-pc');
   const newCodeInput = document.getElementById('newCode');
   const newRollInput = document.getElementById('newRoll');
   const saveBtn = document.getElementById('saveBtn');
@@ -106,12 +108,14 @@ function initFab() {
       console.warn('[site-blocker] extension context unavailable during updateDisplay');
       fabClass.textContent = '!';
       fabRoll.textContent = 'Roll: -';
+      fabPc.textContent = 'PC: -';
       return;
     }
 
     try {
-      const { studentInfo = {}, labClassFabPosition = 'right' } = await chrome.storage.local.get([
+      const { studentInfo = {}, pcCode = '', labClassFabPosition = 'right' } = await chrome.storage.local.get([
         'studentInfo',
+        'pcCode',
         'labClassFabPosition',
       ]);
       const classCode = studentInfo.classCode || '?'; // Show ? if not set
@@ -123,11 +127,12 @@ function initFab() {
       // Update button text to show current class code and roll number
       fabClass.textContent = classCode;
       fabRoll.textContent = `Roll: ${rollNumber}`;
+      fabPc.textContent = `PC: ${pcCode || '-'}`;
 
       // Update panel info
       const display = studentInfo.classCode 
-        ? `Class: ${studentInfo.classCode} | Roll: ${studentInfo.rollNumber || '—'}`
-        : 'Not set';
+        ? `Class: ${studentInfo.classCode} | Roll: ${studentInfo.rollNumber || '—'} | PC: ${pcCode || '—'}`
+        : `Class: — | Roll: — | PC: ${pcCode || '—'}`;
 
       document.getElementById('currentInfo').textContent = display;
       newCodeInput.value = studentInfo.classCode || '';
@@ -136,6 +141,7 @@ function initFab() {
       console.warn('Storage error:', e);
       fabClass.textContent = '!';
       fabRoll.textContent = 'Roll: -';
+      fabPc.textContent = 'PC: -';
     }
   }
 
@@ -228,7 +234,7 @@ function initFab() {
 
   // Auto-update button if changed from options page
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo || changes.labClassFabPosition) updateDisplay();
+    if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition) updateDisplay();
   });
 }
 

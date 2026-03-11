@@ -132,6 +132,7 @@ async function writeLogToFirestore(payload) {
       rollNumber: { stringValue: String(payload.rollNumber || '') },
       pcCode: { stringValue: String(payload.pcCode || '') },
       deviceId: { stringValue: String(payload.deviceId || '') },
+      prompt: { stringValue: String(payload.prompt || '') },
       ts: { timestampValue: new Date(payload.ts || Date.now()).toISOString() }
     }
   };
@@ -346,6 +347,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else {
         sendResponse({ success: false, message: 'No class code set' });
       }
+    } else if (message && message.type === "logChatGptPrompt") {
+      const prompt = String(message.prompt || '').trim();
+      if (!prompt) {
+        console.log('[site-blocker] logChatGptPrompt skipped: empty prompt');
+        sendResponse({ success: false, message: 'No prompt provided' });
+        return;
+      }
+
+      console.log('[site-blocker] logChatGptPrompt received', { prompt });
+      const deviceId = await getOrCreateDeviceId();
+      const { pcCode = '' } = await chrome.storage.local.get('pcCode');
+      const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
+
+      await writeLogToFirestore({
+        url: 'https://chatgpt.com/',
+        title: 'ChatGPT Prompt',
+        allowed: true,
+        classCode: studentInfo.classCode || '',
+        rollNumber: studentInfo.rollNumber || '',
+        pcCode,
+        deviceId,
+        prompt,
+        ts: Date.now()
+      });
+
+      console.log('[site-blocker] logChatGptPrompt Firestore write requested');
+      sendResponse({ success: true });
     } else {
       sendResponse(undefined);
     }

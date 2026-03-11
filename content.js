@@ -5,11 +5,13 @@ if (!document.body) {
     if (document.body) {
       observer.disconnect();
       initFab();
+      initChatGptPromptLogger();
     }
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 } else {
   initFab();
+  initChatGptPromptLogger();
 }
 
 function initFab() {
@@ -228,4 +230,58 @@ function initFab() {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.studentInfo || changes.labClassFabPosition) updateDisplay();
   });
+}
+
+function initChatGptPromptLogger() {
+  if (window.location.origin !== 'https://chatgpt.com') return;
+  if (window.__labPolicyChatGptLoggerInitialized) return;
+  window.__labPolicyChatGptLoggerInitialized = true;
+
+  let lastLoggedPrompt = '';
+  let lastLoggedAt = 0;
+
+  async function logPromptFromComposer() {
+    const promptEl = document.getElementById('prompt-textarea');
+    const prompt = promptEl?.innerText?.trim();
+
+    if (!prompt) {
+      console.log('[site-blocker] ChatGPT prompt logging skipped: empty prompt');
+      return;
+    }
+
+    const now = Date.now();
+    if (prompt === lastLoggedPrompt && now - lastLoggedAt < 3000) {
+      console.log('[site-blocker] ChatGPT prompt logging skipped: duplicate submit', { prompt });
+      return;
+    }
+
+    lastLoggedPrompt = prompt;
+    lastLoggedAt = now;
+
+    try {
+      console.log('[site-blocker] ChatGPT prompt detected', { prompt });
+      const response = await chrome.runtime.sendMessage({
+        type: 'logChatGptPrompt',
+        prompt,
+      });
+      console.log('[site-blocker] ChatGPT prompt logged', response);
+    } catch (error) {
+      console.warn('[site-blocker] failed to log ChatGPT prompt', error);
+    }
+  }
+
+  document.addEventListener('click', (event) => {
+    const submitButton = event.target.closest('#composer-submit-button');
+    if (!submitButton) return;
+    console.log('[site-blocker] ChatGPT submit button clicked');
+    logPromptFromComposer();
+  }, true);
+
+  document.addEventListener('keydown', (event) => {
+    const promptEl = event.target.closest('#prompt-textarea');
+    if (!promptEl) return;
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+    console.log('[site-blocker] ChatGPT prompt submitted with Enter key');
+    logPromptFromComposer();
+  }, true);
 }

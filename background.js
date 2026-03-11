@@ -305,17 +305,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message && message.type === "refreshWishlist") {
       // Clear cache to force refresh
       await chrome.storage.local.remove('classWishlistCache');
+      const requestedClassCode = String(message.classCode || '').trim();
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
-      if (studentInfo.classCode) {
-        const wishlist = await fetchClassWishlist(studentInfo.classCode);
+      const classCode = requestedClassCode || studentInfo.classCode || '';
+
+      if (classCode) {
+        const wishlist = await fetchClassWishlist(classCode);
+        if (!wishlist.length) {
+          sendResponse({
+            success: false,
+            message: `Class code "${classCode}" was not found in Firestore.`,
+            classCode
+          });
+          return;
+        }
+
         await chrome.storage.local.set({
           classWishlistCache: {
-            classCode: studentInfo.classCode,
+            classCode,
             wishlist,
             timestamp: Date.now()
           }
         });
-        sendResponse({ success: true, wishlist, classCode: studentInfo.classCode });
+        sendResponse({ success: true, wishlist, classCode });
       } else {
         sendResponse({ success: false, message: 'No class code set' });
       }

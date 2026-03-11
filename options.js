@@ -162,8 +162,11 @@ $("submitClassCode").addEventListener("click", async () => {
   const roll = $("rollNumber").value.trim();
   if (!code) return showStudentMessage("Enter class code.", "error");
   if (!roll) return showStudentMessage("Enter roll number.", "error");
+  const refreshResponse = await chrome.runtime.sendMessage({ type: "refreshWishlist", classCode: code });
+  if (!refreshResponse?.success) {
+    return showStudentMessage(refreshResponse?.message || "Class code was not found in Firestore.", "error");
+  }
   await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-  await chrome.runtime.sendMessage({ type: "refreshWishlist" });
   await loadWhitelistTextarea();
   showStudentMessage("Submitted.", "success");
 });

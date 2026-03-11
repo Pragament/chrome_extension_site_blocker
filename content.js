@@ -154,12 +154,17 @@ function initFab() {
     }
 
     try {
+      console.debug('[site-blocker] validating class code against Firestore');
+      const refreshResponse = await chrome.runtime.sendMessage({ type: 'refreshWishlist', classCode: code });
+      console.debug('[site-blocker] refreshWishlist response received', refreshResponse);
+
+      if (!refreshResponse?.success) {
+        alert(refreshResponse?.message || 'Class code was not found in Firestore.');
+        return;
+      }
+
       console.debug('[site-blocker] saving studentInfo to chrome.storage.local');
       await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-
-      console.debug('[site-blocker] studentInfo saved, requesting Firestore wishlist refresh');
-      const refreshResponse = await chrome.runtime.sendMessage({ type: 'refreshWishlist' });
-      console.debug('[site-blocker] refreshWishlist response received', refreshResponse);
 
       console.debug('[site-blocker] wishlist refresh completed, refreshing panel display');
       await updateDisplay();

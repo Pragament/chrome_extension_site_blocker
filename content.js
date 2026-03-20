@@ -50,6 +50,7 @@ function initFab() {
     <strong>Current: <span id="currentInfo">Loading...</span></strong>
     <input type="text" id="newCode" placeholder="Class Code (e.g. 10A)">
     <input type="text" id="newRoll" placeholder="Roll Number">
+    <div class="field-help">For multiple students, use hyphen separator. Examples: A6, A6-B5, A6-B5-C8.</div>
     <button id="saveBtn">Update</button>
     <button id="clearBtn" class="clear-btn">Clear</button>
     <button id="toggleFabPositionBtn" type="button">Move to Left</button>

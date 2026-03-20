@@ -112,6 +112,13 @@
   font-size: 14px;
 }
 
+#labClassPanel .field-help {
+  margin-top: -6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #666;
+}
+
 #labClassPanel button {
   padding: 10px;
   background: #3498db;

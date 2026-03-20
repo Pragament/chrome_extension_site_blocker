@@ -17,6 +17,37 @@ The extension's goal is to prevent access to user-configured sites (for producti
 5. Click "Load unpacked" and select the project folder (the folder containing `manifest.json`).
 6. Test by visiting a site listed in the blocked list.
 
+## Minimal config
+
+The extension works with a small local setup and optional remote services.
+
+### Extension options
+
+Open the extension options page after loading the unpacked extension.
+
+### First-time setup
+
+On the first open of the options page, the extension asks for:
+
+- `Admin password`
+- `PC name` / `PC code`
+
+These are stored in `chrome.storage.local` as part of the local device setup. After setup completes, the admin can log in and manage the whitelist/settings.
+
+### Admin password
+
+- Required on first run
+- Minimum length is 4 characters
+- Stored as `adminPasswordHash` and `adminSalt`
+- Used to unlock the admin settings page
+
+### PC name
+
+- The UI calls this `PC code`, but it can be used as the PC name for the device
+- Required on first run
+- Can be updated later from the options page
+- Stored locally as `pcCode`
+
 ## Install from GitHub Releases (Developer mode / unpacked)
 
 If you want to install the extension from a GitHub release instead of cloning the repository:

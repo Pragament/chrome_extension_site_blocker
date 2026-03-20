@@ -17,6 +17,20 @@ The extension's goal is to prevent access to user-configured sites (for producti
 5. Click "Load unpacked" and select the project folder (the folder containing `manifest.json`).
 6. Test by visiting a site listed in the blocked list.
 
+## Install from GitHub Releases (Developer mode / unpacked)
+
+If you want to install the extension from a GitHub release instead of cloning the repository:
+
+1. Open the repository's Releases page on GitHub.
+2. Download the latest release asset, such as `lab-policy-whitelist-chrome-web-store.zip`.
+3. Extract the zip file to a local folder.
+4. Open Chrome and navigate to `chrome://extensions/`.
+5. Enable "Developer mode" (top-right).
+6. Click "Load unpacked".
+7. Select the extracted folder that contains `manifest.json`.
+
+After loading, Chrome will install the extension as an unpacked extension. If you update to a newer release later, extract the new zip and reload or re-import the unpacked folder from `chrome://extensions/`.
+
 ## Typical file layout and what to edit
 
 Note: file names below describe common extension structure. If your copy differs, open the repo root to confirm exact names.

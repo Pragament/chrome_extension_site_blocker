@@ -3,6 +3,8 @@
 try { importScripts('config.js'); } catch (e) {}
 // Using Firebase REST only for Firestore writes (no SDK loaded)
 const MAX_LOGS = 10000;
+const BLOCK_ALL_RULE_ID = 1;
+const ALLOW_RULE_ID_START = 1000;
 // Load CONFIG if available (from config.js)
 const HEARTBEAT_MINUTES = (self.CONFIG && self.CONFIG.HEARTBEAT_MINUTES) || 1;
 const BACKEND_BASE = (self.CONFIG && self.CONFIG.BACKEND_BASE) || "";
@@ -27,6 +29,89 @@ function withRequiredRules(lines = []) {
   }
 
   return Array.from(new Set(normalized));
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function patternToRegex(rule) {
+  const pattern = String(rule || '').trim();
+  if (!pattern) return null;
+
+  if (/^https?:\/\//.test(pattern)) {
+    return `^${escapeRegex(pattern)}`;
+  }
+
+  if (pattern.startsWith('*.')) {
+    const base = pattern.slice(2);
+    if (!base) return null;
+    return `^https?:\\/\\/([^/?#]+\\.)*${escapeRegex(base)}([/:?#]|$)`;
+  }
+
+  return `^https?:\\/\\/[^/?#]*${escapeRegex(pattern)}[^/?#]*([/:?#]|$)`;
+}
+
+function buildDynamicRules(whitelist) {
+  const rules = [];
+  let nextRuleId = ALLOW_RULE_ID_START;
+
+  for (const rule of whitelist) {
+    const regexFilter = patternToRegex(rule);
+    if (!regexFilter) continue;
+
+    rules.push({
+      id: nextRuleId,
+      priority: 2,
+      action: { type: 'allow' },
+      condition: {
+        regexFilter,
+        resourceTypes: ['main_frame']
+      }
+    });
+    nextRuleId += 1;
+  }
+
+  rules.push({
+    id: BLOCK_ALL_RULE_ID,
+    priority: 1,
+    action: {
+      type: 'redirect',
+      redirect: {
+        regexSubstitution: `${chrome.runtime.getURL('blocked.html')}#orig=\\0`
+      }
+    },
+    condition: {
+      regexFilter: '^(https?://.+)$',
+      resourceTypes: ['main_frame']
+    }
+  });
+
+  return rules;
+}
+
+async function syncBlockingRules() {
+  const whitelist = withRequiredRules(await getCombinedWhitelist());
+  const rules = buildDynamicRules(whitelist);
+  const { dnrRuleIds = [] } = await chrome.storage.local.get('dnrRuleIds');
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: dnrRuleIds,
+    addRules: rules
+  });
+
+  await chrome.storage.local.set({
+    dnrRuleIds: rules.map((rule) => rule.id),
+    dnrLastSync: {
+      at: Date.now(),
+      whitelistSize: whitelist.length
+    }
+  });
+
+  console.log('[LabPolicy] declarativeNetRequest rules synced', {
+    whitelistSize: whitelist.length,
+    ruleCount: rules.length
+  });
 }
 
 // Generate or fetch persistent device ID
@@ -303,11 +388,68 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   // Create repeating heartbeat alarm
   chrome.alarms.create("heartbeat", { periodInMinutes: HEARTBEAT_MINUTES });
+  await syncBlockingRules();
 });
 
 // On browser startup
 chrome.runtime.onStartup.addListener(() => {
   console.log('[LabPolicy] service worker startup');
+  syncBlockingRules().catch((error) => {
+    console.warn('[LabPolicy] failed to sync rules on startup', error);
+  });
+});
+
+function isHttpUrl(url = '') {
+  return /^https?:\/\//.test(url);
+}
+
+function isBlockedPageUrl(url = '') {
+  return url.startsWith(chrome.runtime.getURL('blocked.html'));
+}
+
+async function togglePanelInTab(tab) {
+  if (!tab?.id || !tab.url) return;
+
+  if (isBlockedPageUrl(tab.url)) {
+    await chrome.tabs.sendMessage(tab.id, { type: 'toggleFabPanel' });
+    return;
+  }
+
+  if (!isHttpUrl(tab.url)) {
+    console.log('[LabPolicy] toolbar click ignored for unsupported tab', tab.url);
+    return;
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'toggleFabPanel' });
+  } catch (error) {
+    await chrome.scripting.insertCSS({
+      target: { tabId: tab.id },
+      files: ['content.css']
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content.js']
+    });
+    await chrome.tabs.sendMessage(tab.id, { type: 'toggleFabPanel' });
+  }
+}
+
+chrome.action.onClicked.addListener(async (tab) => {
+  try {
+    await togglePanelInTab(tab);
+  } catch (error) {
+    console.warn('[LabPolicy] failed to toggle toolbar panel', error);
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  if (!changes.whitelist && !changes.studentInfo && !changes.classWishlistCache) return;
+
+  syncBlockingRules().catch((error) => {
+    console.warn('[LabPolicy] failed to sync rules after storage change', error);
+  });
 });
 
 // Heartbeat on alarm
@@ -396,37 +538,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // keep channel open for async reply
 });
 
-// Match URL against whitelist patterns
-function isAllowed(url, whitelist) {
-  try {
-    const u = new URL(url);
-    for (const rule of whitelist) {
-      const pattern = rule.trim();
-      if (!pattern) continue;
-
-      // Exact domain match
-      if (u.hostname === pattern) return true;
-
-      // Subdomain wildcard (*.example.com)
-      if (pattern.startsWith("*.")) {
-        const base = pattern.slice(2);
-        if (u.hostname === base || u.hostname.endsWith("." + base)) {
-          return true;
-        }
-      }
-
-      // Prefix match (full URL starts with)
-      if (url.startsWith(pattern)) return true;
-
-      // Plain domain contains
-      if (u.hostname.includes(pattern)) return true;
-    }
-  } catch (e) {
-    console.warn("Bad URL:", url);
-  }
-  return false;
-}
-
 // Log visit
 async function logVisit(url, title, tabId, allowed) {
   const timestamp = new Date().toISOString();
@@ -468,44 +579,12 @@ async function logVisit(url, title, tabId, allowed) {
 }
 
 
-// Handle navigation
-chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  if (details.frameId !== 0) return; // only main-frame
-
-  // Ignore navigation to the extension's own URLs and the new tab page
-  if (details.url.startsWith(chrome.runtime.getURL('')) || details.url === "chrome://new-tab-page-third-party/") {
-    return;
-  }
-
-  console.log('[LabPolicy] onBeforeNavigate', details.url);
-  const whitelist = await getCombinedWhitelist();
-  const allowed = isAllowed(details.url, whitelist);
-
-  if (!allowed) {
-    chrome.tabs.update(details.tabId, {
-      url: chrome.runtime.getURL("blocked.html") + "?orig=" + encodeURIComponent(details.url)
-    });
-  }
-
-  chrome.tabs.get(details.tabId, (tab) => {
-    const title = tab?.title || "Untitled";
-    console.log('[LabPolicy] logging visit', { url: details.url, allowed });
-    logVisit(details.url, title, details.tabId, allowed);
-  });
-});
-
-// Fallback: also listen to tab updates when a page completes loading
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete' || !tab.url) return;
   if (tab.url.startsWith(chrome.runtime.getURL(''))) return;
   if (tab.url.startsWith('chrome://')) return;
   try {
     console.log('[LabPolicy] tabs.onUpdated complete', tab.url);
-    const whitelist = await getCombinedWhitelist();
-    const allowed = isAllowed(tab.url, whitelist);
-    if (!allowed) {
-      chrome.tabs.update(tabId, { url: chrome.runtime.getURL('blocked.html') + '?orig=' + encodeURIComponent(tab.url) });
-    }
-    logVisit(tab.url, tab.title || 'Untitled', tabId, allowed);
+    logVisit(tab.url, tab.title || 'Untitled', tabId, true);
   } catch (e) {}
 });

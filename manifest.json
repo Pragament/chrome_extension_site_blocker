@@ -10,9 +10,11 @@
     "128": "icons/icon128.png"
   },
   "permissions": [
+    "activeTab",
+    "declarativeNetRequest",
     "storage",
+    "scripting",
     "tabs",
-    "webNavigation",
     "alarms"
   ],
   "host_permissions": [
@@ -36,11 +38,9 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*"
+        "https://chatgpt.com/*"
       ],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": ["chatgpt.js"],
       "run_at": "document_end",
       "all_frames": false
     }

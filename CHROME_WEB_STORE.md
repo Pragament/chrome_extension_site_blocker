@@ -15,17 +15,20 @@ Upload the generated archive at `dist/lab-policy-whitelist-chrome-web-store.zip`
 
 - The extension enforces whitelist-only browsing on managed/shared lab machines.
 - It stores local admin and student/session state in `chrome.storage.local`.
-- It redirects blocked navigations to the bundled `blocked.html` page.
+- It enforces browsing policy with Manifest V3 `declarativeNetRequest` dynamic rules generated from the current whitelist.
+- Blocked navigations are redirected to the bundled `blocked.html` page.
 - It can log visit metadata and ChatGPT prompts to Firebase/GA only when valid production configuration is provided in `config.js`.
 - Heartbeat and uninstall callbacks are disabled automatically when `BACKEND_BASE` is blank.
 
 ## Permission justification
 
 - `storage`: saves whitelist rules, device ID, login state, PC code, and cached class data.
-- `tabs`: redirects blocked tabs and reads current tab metadata for logging.
-- `webNavigation`: evaluates top-level navigations before the destination page loads.
+- `activeTab`: opens the floating class-code panel only for the tab the user explicitly clicks from the toolbar.
+- `declarativeNetRequest`: enforces the whitelist using generated allow and redirect rules instead of request-time script logic.
+- `scripting`: injects the floating class-code panel into the current active tab on demand.
+- `tabs`: reads current tab metadata for logging and supports action-button behavior on the active tab.
 - `alarms`: sends periodic heartbeat pings when a backend is configured.
-- `<all_urls>`: required because the policy engine and the floating class-code panel operate across arbitrary sites.
+- `<all_urls>`: required because whitelist rules may allow arbitrary destinations and the default DNR rule redirects all other web navigations.
 
 ## Privacy disclosure draft
 

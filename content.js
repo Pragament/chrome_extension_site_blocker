@@ -122,8 +122,6 @@ function initFab() {
         const link = document.createElement('a');
         link.href = href;
         link.textContent = rule;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
         item.appendChild(link);
       } else {
         const text = document.createElement('span');

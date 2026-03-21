@@ -48,6 +48,10 @@ function initFab() {
   panel.innerHTML = `
     <div class="close-btn" title="Close">×</div>
     <strong>Current: <span id="currentInfo">Loading...</span></strong>
+    <div class="panel-section">
+      <strong>Whitelisted websites</strong>
+      <div id="whitelistLinks" class="whitelist-links">Loading...</div>
+    </div>
     <input type="text" id="newCode" placeholder="Class Code (e.g. 10A)">
     <input type="text" id="newRoll" placeholder="Roll Number">
     <button id="saveBtn">Update</button>
@@ -63,6 +67,75 @@ function initFab() {
   const newRollInput = document.getElementById('newRoll');
   const saveBtn = document.getElementById('saveBtn');
   const toggleFabPositionBtn = document.getElementById('toggleFabPositionBtn');
+  const whitelistLinks = document.getElementById('whitelistLinks');
+
+  function getDisplayWhitelist({ whitelist = [], classWishlistCache = null, studentInfo = {} }) {
+    let lines = Array.isArray(whitelist) ? [...whitelist] : [];
+    const hasFetchedWishlist = classWishlistCache &&
+      classWishlistCache.classCode === studentInfo.classCode &&
+      Array.isArray(classWishlistCache.wishlist);
+
+    if (hasFetchedWishlist) {
+      lines = [...lines, ...classWishlistCache.wishlist];
+    }
+
+    if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
+      lines = [...lines, ...self.CONFIG.REQUIRED_RULES];
+    }
+
+    return Array.from(
+      new Set(
+        lines
+          .map((line) => String(line || '').trim())
+          .filter((line) => line && !/^chrome:\/\//i.test(line))
+      )
+    );
+  }
+
+  function ruleToHref(rule) {
+    const normalizedRule = String(rule || '').trim();
+    if (!normalizedRule) return '';
+    if (/^https?:\/\//i.test(normalizedRule)) return normalizedRule;
+    if (/^[a-z]+:\/\//i.test(normalizedRule)) return '';
+
+    const hostname = normalizedRule.replace(/^\*\./, '').replace(/\/+$/, '');
+    if (!hostname) return '';
+
+    return `https://${hostname}`;
+  }
+
+  function renderWhitelistLinks(rules) {
+    whitelistLinks.innerHTML = '';
+
+    if (!rules.length) {
+      whitelistLinks.textContent = 'No whitelisted websites found.';
+      return;
+    }
+
+    const list = document.createElement('ul');
+
+    rules.forEach((rule) => {
+      const href = ruleToHref(rule);
+      const item = document.createElement('li');
+
+      if (href) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.textContent = rule;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        item.appendChild(link);
+      } else {
+        const text = document.createElement('span');
+        text.textContent = rule;
+        item.appendChild(text);
+      }
+
+      list.appendChild(item);
+    });
+
+    whitelistLinks.appendChild(list);
+  }
 
   // Toggle panel
   fab.addEventListener('click', (e) => {
@@ -113,11 +186,18 @@ function initFab() {
     }
 
     try {
-      const { studentInfo = {}, pcCode = '', labClassFabPosition = 'right' } = await chrome.storage.local.get([
+      const storageState = await chrome.storage.local.get([
         'studentInfo',
         'pcCode',
         'labClassFabPosition',
+        'whitelist',
+        'classWishlistCache',
       ]);
+      const {
+        studentInfo = {},
+        pcCode = '',
+        labClassFabPosition = 'right',
+      } = storageState;
       const classCode = studentInfo.classCode || '?'; // Show ? if not set
       const rollNumber = studentInfo.rollNumber || '-';
 
@@ -137,11 +217,13 @@ function initFab() {
       document.getElementById('currentInfo').textContent = display;
       newCodeInput.value = studentInfo.classCode || '';
       newRollInput.value = studentInfo.rollNumber || '';
+      renderWhitelistLinks(getDisplayWhitelist(storageState));
     } catch (e) {
       console.warn('Storage error:', e);
       fabClass.textContent = '!';
       fabRoll.textContent = 'Roll: -';
       fabPc.textContent = 'PC: -';
+      whitelistLinks.textContent = 'Unable to load whitelist.';
     }
   }
 
@@ -234,7 +316,9 @@ function initFab() {
 
   // Auto-update button if changed from options page
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition) updateDisplay();
+    if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
+      updateDisplay();
+    }
   });
 }
 

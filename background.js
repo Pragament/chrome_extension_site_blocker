@@ -817,14 +817,16 @@ async function fetchClassDetails(classCode) {
       const doc = data[0].document;
       const wishlistField = doc.fields?.wishlist?.arrayValue?.values;
       const classNameField = doc.fields?.name?.stringValue;
+      const imageUrlField = doc.fields?.imageUrl?.stringValue;
 
       const wishlist = wishlistField && Array.isArray(wishlistField)
         ? wishlistField.map(item => item.stringValue).filter(Boolean)
         : [];
       const className = classNameField || "";
+      const imageUrl = imageUrlField || "";
 
-      console.log('[fetchClassDetails] Found details for class', classCode, className, wishlist);
-      return { found: true, wishlist, className };
+      console.log('[fetchClassDetails] Found details for class', classCode, className, wishlist, imageUrl);
+      return { found: true, wishlist, className, imageUrl };
     }
 
     console.log('[fetchClassDetails] No class document found for class code', classCode);
@@ -879,6 +881,7 @@ async function getCombinedWhitelist() {
           classCode: studentInfo.classCode,
           wishlist: details.wishlist,
           className: details.className,
+          imageUrl: details.imageUrl || "",
           timestamp: now
         }
       });
@@ -970,7 +973,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const { wishlist, className } = details;
+        const { wishlist, className, imageUrl } = details;
 
         // Retrieve current studentInfo to preserve existing fields like rollNumber
         const { studentInfo: currentInfo = {} } = await chrome.storage.local.get('studentInfo');
@@ -987,10 +990,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             classCode,
             wishlist,
             className,
+            imageUrl: imageUrl || "",
             timestamp: Date.now()
           }
         });
-        sendResponse({ success: true, wishlist, classCode, className });
+        sendResponse({ success: true, wishlist, classCode, className, imageUrl });
       } else {
         sendResponse({ success: false, message: 'No class code set' });
       }

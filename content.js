@@ -345,11 +345,13 @@ function initFab() {
   });
 
   // Auto-update button if changed from options page
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
-      updateDisplay();
-    }
-  });
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
+        updateDisplay();
+      }
+    });
+  }
 }
 
 // ============================================================

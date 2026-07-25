@@ -104,7 +104,7 @@ window.filterQuizzes = () => {
 
     const term = quizSearchInput ? quizSearchInput.value.toLowerCase() : '';
     let selectedClass = classFilterInput ? classFilterInput.value : '';
-    
+
     // Check for active class button in embed.html
     if (classButtonsContainer) {
         const activeClassBtn = document.querySelector('.class-filter-btn.active');
@@ -116,7 +116,7 @@ window.filterQuizzes = () => {
             return;
         }
     }
-    
+
     const filtered = state.quizzes.filter(q => {
         const matchesSearch = q.title.toLowerCase().includes(term);
         const matchesClass = !selectedClass || (q.targetClass && q.targetClass.toString().trim() === selectedClass);
@@ -137,21 +137,21 @@ function initEventListeners() {
             filterQuizzes();
         });
     }
-    
+
     if (classFilterInput) {
         classFilterInput.addEventListener('change', () => {
             trackEvent('quiz_class_filter', { 'class': classFilterInput.value });
             filterQuizzes();
         });
     }
-    
+
     // Class buttons delegation for embed.html
     const classButtonsContainer = document.getElementById('class-buttons-container');
     if (classButtonsContainer) {
         classButtonsContainer.addEventListener('click', (e) => {
             if (e.target.classList.contains('class-filter-btn') || e.target.closest('.class-filter-btn')) {
                 const btn = e.target.classList.contains('class-filter-btn') ? e.target : e.target.closest('.class-filter-btn');
-                
+
                 // If it's a reset action (clicking the already active button could act as reset, or we just keep it simple)
                 if (btn.classList.contains('active')) {
                     // Reset: show all buttons
@@ -174,11 +174,11 @@ function initEventListeners() {
                             b.style.display = 'none'; // Hide unselected
                         }
                     });
-                    
+
                     btn.classList.add('active', 'btn-primary');
                     btn.classList.remove('btn-outline-primary');
                     btn.innerHTML = `<i class="bi bi-arrow-left me-2"></i> ${btn.textContent}`; // Add back arrow to indicate they can click to go back
-                    
+
                     trackEvent('quiz_class_button', { 'class': btn.dataset.class });
                     filterQuizzes();
                 }
@@ -429,32 +429,32 @@ async function loadQuestionPapers() {
 
 function getUniqueClasses() {
     // Generate classes 1 to 10
-    return Array.from({length: 10}, (_, i) => (i + 1).toString());
+    return Array.from({ length: 10 }, (_, i) => (i + 1).toString());
 }
 
 function populateClassDropdowns() {
     const classes = getUniqueClasses();
-    
+
     // Homepage filter
     const hpFilter = document.getElementById('homepage-class-filter');
     if (hpFilter) {
         const currentValue = hpFilter.value;
-        hpFilter.innerHTML = '<option value="">All Classes</option>' + 
+        hpFilter.innerHTML = '<option value="">All Classes</option>' +
             classes.map(c => `<option value="${c}">Class ${c}</option>`).join('');
         hpFilter.value = currentValue;
     }
-    
+
     // Modal target class
     const targetSelect = document.getElementById('quiz-target-class');
     if (targetSelect) {
         const currentValue = targetSelect.value;
-        targetSelect.innerHTML = '<option value="">Select a Class</option>' + 
+        targetSelect.innerHTML = '<option value="">Select a Class</option>' +
             classes.map(c => `<option value="${c}">Class ${c}</option>`).join('');
         if (currentValue && classes.includes(currentValue)) {
             targetSelect.value = currentValue;
         }
     }
-    
+
     // Embed.html class buttons
     const classButtonsContainer = document.getElementById('class-buttons-container');
     if (classButtonsContainer) {
@@ -507,7 +507,7 @@ function updateRoundsConfig() {
     const container = document.getElementById('rounds-config');
     const targetClassEl = document.getElementById('quiz-target-class');
     const targetClass = targetClassEl ? targetClassEl.value : '';
-    
+
     if (container) container.innerHTML = '';
 
     for (let i = 1; i <= numRounds; i++) {
@@ -518,7 +518,7 @@ function updateRoundsConfig() {
             const qCount = ` - ${p.questionCount} questions`;
             return `<option value="${p.id}">${p.title}${info}${qCount}</option>`;
         }).join('');
-        
+
         if (availablePapers.length === 0) {
             paperOptions = `<option value="" disabled>No question papers found.</option>`;
         }
@@ -1530,7 +1530,7 @@ document.getElementById('save-quiz-btn').addEventListener('click', async () => {
         alert('Please enter a quiz title');
         return;
     }
-    
+
     const targetClass = document.getElementById('quiz-target-class').value;
     if (!targetClass) {
         alert('Please select a Target Class');

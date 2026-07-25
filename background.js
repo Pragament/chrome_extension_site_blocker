@@ -998,6 +998,83 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else {
         sendResponse({ success: false, message: 'No class code set' });
       }
+    } else if (message && message.type === "verifyStudent") {
+      const admissionNo = String(message.admissionNo || '').trim();
+      const phoneNumber = String(message.phoneNumber || '').trim();
+      if (!admissionNo || !phoneNumber) {
+        sendResponse({ success: false, message: 'Missing parameters' });
+        return;
+      }
+      const accessToken = await getFirebaseAccessToken();
+      if (!accessToken || !self.CONFIG || !self.CONFIG.FIREBASE) {
+        sendResponse({ success: false, message: 'Firebase configuration error' });
+        return;
+      }
+      try {
+        const projectId = self.CONFIG.FIREBASE.projectId;
+        const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+        const queryPayload = {
+          structuredQuery: {
+            from: [{ collectionId: 'students' }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: 'phoneNumber' },
+                op: 'IN',
+                value: {
+                  arrayValue: {
+                    values: [
+                      { stringValue: phoneNumber },
+                      { stringValue: phoneNumber + '\n' },
+                      { stringValue: phoneNumber + '\r\n' },
+                      { stringValue: ' ' + phoneNumber },
+                      { stringValue: phoneNumber + ' ' }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify(queryPayload)
+        });
+        if (!res.ok) {
+          sendResponse({ success: false, message: 'Query request failed' });
+          return;
+        }
+        const data = await res.json();
+        let foundDoc = null;
+        const targetAdmissionNo = admissionNo.trim();
+
+        if (data && Array.isArray(data)) {
+          for (const item of data) {
+            if (item.document) {
+              const doc = item.document;
+              const dbAdmissionNo = String(doc.fields?.admissionNo?.stringValue || '').trim();
+              if (dbAdmissionNo === targetAdmissionNo) {
+                foundDoc = doc;
+                break;
+              }
+            }
+          }
+        }
+
+        if (foundDoc) {
+          const studentName = foundDoc.fields?.name?.stringValue || "";
+          const classField = foundDoc.fields?.class || foundDoc.fields?.['class '] || foundDoc.fields?.Class || foundDoc.fields?.['Class '];
+          const studentClass = classField && classField.stringValue ? classField.stringValue.trim() : "";
+          sendResponse({ success: true, name: studentName, class: studentClass });
+        } else {
+          sendResponse({ success: false, message: 'Student not found' });
+        }
+      } catch (err) {
+        sendResponse({ success: false, message: err.message });
+      }
     } else if (message && message.type === "logChatGptPrompt") {
       // Legacy handler — kept for backward compatibility, delegates to logAiPrompt logic
       const prompt = String(message.prompt || '').trim();

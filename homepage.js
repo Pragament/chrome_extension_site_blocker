@@ -60,12 +60,58 @@ document.addEventListener('DOMContentLoaded', () => {
         classSelect.addEventListener('change', (e) => saveStudentInfo({ grade: e.target.value }));
     }
     
+    function checkAndTriggerVerify() {
+        const adm = admissionInput ? admissionInput.value.trim() : '';
+        const ph = guardianPhoneInput ? guardianPhoneInput.value.trim() : '';
+        if (adm && ph) {
+            performStudentLookup(adm, ph);
+        } else {
+            const greetingEl = document.getElementById('homepage-student-greeting');
+            const errorEl = document.getElementById('homepage-student-error');
+            if (greetingEl) greetingEl.style.display = 'none';
+            if (errorEl) errorEl.style.display = 'none';
+
+            // Clear studentName from storage since inputs are not fully filled
+            if (!chrome || !chrome.storage) {
+                const savedStudentInfoStr = localStorage.getItem('studentInfo');
+                if (savedStudentInfoStr) {
+                    const currentInfo = JSON.parse(savedStudentInfoStr);
+                    delete currentInfo.studentName;
+                    localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
+                }
+            } else {
+                chrome.storage.local.get(['studentInfo'], (res) => {
+                    const currentInfo = res.studentInfo || {};
+                    delete currentInfo.studentName;
+                    chrome.storage.local.set({ studentInfo: currentInfo });
+                });
+            }
+        }
+    }
+
+    const triggerVerifyOnEnter = (e) => {
+        if (e.key === 'Enter') {
+            const val = e.target.value.trim();
+            const updateField = e.target.id === 'homepage-admission-input' ? { admissionNumber: val } : { guardianPhone: val };
+            saveStudentInfo(updateField);
+            checkAndTriggerVerify();
+        }
+    };
+
     if (admissionInput) {
-        admissionInput.addEventListener('blur', (e) => saveStudentInfo({ admissionNumber: e.target.value.trim() }));
+        admissionInput.addEventListener('blur', (e) => {
+            saveStudentInfo({ admissionNumber: e.target.value.trim() });
+            checkAndTriggerVerify();
+        });
+        admissionInput.addEventListener('keydown', triggerVerifyOnEnter);
     }
     
     if (guardianPhoneInput) {
-        guardianPhoneInput.addEventListener('blur', (e) => saveStudentInfo({ guardianPhone: e.target.value.trim() }));
+        guardianPhoneInput.addEventListener('blur', (e) => {
+            saveStudentInfo({ guardianPhone: e.target.value.trim() });
+            checkAndTriggerVerify();
+        });
+        guardianPhoneInput.addEventListener('keydown', triggerVerifyOnEnter);
     }
 
     if (classCodeInput) {
@@ -216,6 +262,197 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function verifyStudentDirectly(admissionNo, phoneNumber) {
+        if (!admissionNo || !phoneNumber || !window.CONFIG || !window.CONFIG.FIREBASE) {
+            return { success: false, message: "Missing config or parameters" };
+        }
+        const apiKey = window.CONFIG.FIREBASE.apiKey;
+        const projectId = window.CONFIG.FIREBASE.projectId;
+        try {
+            const authRes = await fetch(`${window.CONFIG.FIREBASE.rest.identityToolkit}?key=${encodeURIComponent(apiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ returnSecureToken: true })
+            });
+            if (!authRes.ok) return { success: false, message: "Auth failed" };
+            const authJson = await authRes.json();
+            const refreshToken = authJson.refreshToken;
+
+            const tokenRes = await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(apiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken })
+            });
+            if (!tokenRes.ok) return { success: false, message: "Token exchange failed" };
+            const tokenJson = await tokenRes.json();
+            const accessToken = tokenJson.access_token;
+
+            const endpoint = `${window.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+            const queryPayload = {
+                structuredQuery: {
+                    from: [{ collectionId: "students" }],
+                    where: {
+                        fieldFilter: {
+                            field: { fieldPath: "phoneNumber" },
+                            op: "IN",
+                            value: {
+                                arrayValue: {
+                                    values: [
+                                        { stringValue: phoneNumber },
+                                        { stringValue: phoneNumber + "\n" },
+                                        { stringValue: phoneNumber + "\r\n" },
+                                        { stringValue: " " + phoneNumber },
+                                        { stringValue: phoneNumber + " " }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                body: JSON.stringify(queryPayload)
+            });
+            if (!res.ok) return { success: false, message: "Query failed" };
+            const data = await res.json();
+            let foundDoc = null;
+            const targetAdmissionNo = admissionNo.trim();
+
+            if (data && Array.isArray(data)) {
+                for (const item of data) {
+                    if (item.document) {
+                        const doc = item.document;
+                        const dbAdmissionNo = String(doc.fields?.admissionNo?.stringValue || '').trim();
+                        if (dbAdmissionNo === targetAdmissionNo) {
+                            foundDoc = doc;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (foundDoc) {
+                const studentName = foundDoc.fields?.name?.stringValue || "";
+                const classField = foundDoc.fields?.class || foundDoc.fields?.['class '] || foundDoc.fields?.Class || foundDoc.fields?.['Class '];
+                const studentClass = classField && classField.stringValue ? classField.stringValue.trim() : "";
+                return { success: true, name: studentName, class: studentClass };
+            }
+            return { success: false, message: "Student not found" };
+        } catch (e) {
+            console.error("Direct student verify error:", e);
+            return { success: false, message: e.message };
+        }
+    }
+
+    async function performStudentLookup(admissionNo, phoneNumber) {
+        const greetingEl = document.getElementById('homepage-student-greeting');
+        const errorEl = document.getElementById('homepage-student-error');
+        const infoContainer = document.getElementById('homepage-student-info-container');
+        
+        if (!admissionNo || !phoneNumber) {
+            if (greetingEl) greetingEl.style.display = 'none';
+            if (errorEl) errorEl.style.display = 'none';
+            return;
+        }
+
+        let result = null;
+        if (!chrome || !chrome.storage) {
+            result = await verifyStudentDirectly(admissionNo, phoneNumber);
+        } else {
+            try {
+                result = await chrome.runtime.sendMessage({
+                    type: 'verifyStudent',
+                    admissionNo,
+                    phoneNumber
+                });
+            } catch (err) {
+                console.error("Failed to query student via background:", err);
+                result = { success: false, message: "Connection error" };
+            }
+        }
+
+        if (result && result.success) {
+            const studentName = result.name || "";
+            const studentClass = result.class || "";
+
+            if (greetingEl) {
+                greetingEl.textContent = `Hi, ${studentName}`;
+                greetingEl.style.display = 'inline-block';
+            }
+            if (errorEl) {
+                errorEl.style.display = 'none';
+            }
+            if (infoContainer) {
+                infoContainer.style.display = 'flex';
+            }
+
+            // Save verified info to storage and update class selection dropdown (grade)
+            if (!chrome || !chrome.storage) {
+                const savedStudentInfoStr = localStorage.getItem('studentInfo');
+                const currentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
+                currentInfo.studentName = studentName;
+                if (studentClass) {
+                    currentInfo.grade = studentClass;
+                }
+                localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
+                
+                // Update dropdown selection UI immediately and update iframe
+                if (classSelect && studentClass) {
+                    classSelect.value = studentClass;
+                }
+                updateIframeSrc(currentInfo);
+            } else {
+                chrome.storage.local.get(['studentInfo'], (res) => {
+                    const currentInfo = res.studentInfo || {};
+                    currentInfo.studentName = studentName;
+                    if (studentClass) {
+                        currentInfo.grade = studentClass;
+                    }
+                    chrome.storage.local.set({ studentInfo: currentInfo }, () => {
+                        // Update dropdown selection UI immediately and update iframe
+                        if (classSelect && studentClass) {
+                            classSelect.value = studentClass;
+                        }
+                        updateIframeSrc(currentInfo);
+                    });
+                });
+            }
+        } else {
+            if (greetingEl) {
+                greetingEl.style.display = 'none';
+            }
+            if (errorEl) {
+                errorEl.textContent = 'Student not found';
+                errorEl.style.display = 'inline-block';
+            }
+            if (infoContainer) {
+                infoContainer.style.display = 'flex';
+            }
+            
+            // Clear verified studentName from storage
+            if (!chrome || !chrome.storage) {
+                const savedStudentInfoStr = localStorage.getItem('studentInfo');
+                if (savedStudentInfoStr) {
+                    const currentInfo = JSON.parse(savedStudentInfoStr);
+                    delete currentInfo.studentName;
+                    localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
+                }
+            } else {
+                chrome.storage.local.get(['studentInfo'], (res) => {
+                    const currentInfo = res.studentInfo || {};
+                    delete currentInfo.studentName;
+                    chrome.storage.local.set({ studentInfo: currentInfo });
+                });
+            }
+        }
+    }
+
+
     if (!chrome || !chrome.storage) {
         if (ul) ul.innerHTML = '<li>Error: Cannot access extension storage. Running in local fallback mode.</li>';
         
@@ -249,6 +486,20 @@ document.addEventListener('DOMContentLoaded', () => {
             infoContainer.style.display = 'flex';
         } else if (infoContainer) {
             infoContainer.style.display = 'none';
+        }
+
+        if (studentInfo.studentName && studentInfo.admissionNumber && studentInfo.guardianPhone) {
+            const greetingEl = document.getElementById('homepage-student-greeting');
+            if (greetingEl) {
+                greetingEl.textContent = `Hi, ${studentInfo.studentName}`;
+                greetingEl.style.display = 'inline-block';
+            }
+            if (infoContainer) {
+                infoContainer.style.display = 'flex';
+            }
+        }
+        if (studentInfo.admissionNumber && studentInfo.guardianPhone) {
+            performStudentLookup(studentInfo.admissionNumber, studentInfo.guardianPhone);
         }
 
         // Display class poster placeholder/image initially
@@ -387,6 +638,20 @@ document.addEventListener('DOMContentLoaded', () => {
             infoContainer.style.display = 'flex';
         } else if (infoContainer) {
             infoContainer.style.display = 'none';
+        }
+
+        if (result.studentInfo && result.studentInfo.studentName && result.studentInfo.admissionNumber && result.studentInfo.guardianPhone) {
+            const greetingEl = document.getElementById('homepage-student-greeting');
+            if (greetingEl) {
+                greetingEl.textContent = `Hi, ${result.studentInfo.studentName}`;
+                greetingEl.style.display = 'inline-block';
+            }
+            if (infoContainer) {
+                infoContainer.style.display = 'flex';
+            }
+        }
+        if (result.studentInfo && result.studentInfo.admissionNumber && result.studentInfo.guardianPhone) {
+            performStudentLookup(result.studentInfo.admissionNumber, result.studentInfo.guardianPhone);
         }
 
         // Display class poster/image if available

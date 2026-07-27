@@ -174,6 +174,14 @@ function sanitizeFirestoreDocId(value) {
     .slice(0, 80) || 'unknown';
 }
 
+function maskPhoneLastN(phone, n) {
+  const cleaned = String(phone || '').trim().replace(/\r?\n|\r/g, '');
+  if (cleaned.length <= n) return cleaned;
+  const visible = cleaned.slice(-n);
+  const masked = '*'.repeat(cleaned.length - n);
+  return masked + visible;
+}
+
 function getCodeHelpRequestId({ classCode, rollNumber, pageUrl }) {
   return [
     sanitizeFirestoreDocId(classCode),
@@ -571,6 +579,34 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
   const projectId = self.CONFIG.FIREBASE.projectId;
   const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
 
+  const rollNumbers = rollNumber.split('-').map(r => r.trim()).filter(Boolean);
+  if (rollNumbers.length > 1) {
+    rollNumbers.push(rollNumber);
+  }
+
+  let rollFilter;
+  if (rollNumbers.length > 1) {
+    rollFilter = {
+      fieldFilter: {
+        field: { fieldPath: "rollNumber" },
+        op: "IN",
+        value: {
+          arrayValue: {
+            values: rollNumbers.map(r => ({ stringValue: r }))
+          }
+        }
+      }
+    };
+  } else {
+    rollFilter = {
+      fieldFilter: {
+        field: { fieldPath: "rollNumber" },
+        op: "EQUAL",
+        value: { stringValue: rollNumber }
+      }
+    };
+  }
+
   const queryPayload = {
     structuredQuery: {
       from: [{ collectionId: "questions" }],
@@ -585,13 +621,7 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
                 value: { stringValue: classCode }
               }
             },
-            {
-              fieldFilter: {
-                field: { fieldPath: "rollNumber" },
-                op: "EQUAL",
-                value: { stringValue: rollNumber }
-              }
-            }
+            rollFilter
           ]
         }
       },
@@ -768,14 +798,16 @@ async function dbAcceptAnswer(payload) {
 }
 
 /**
- * Fetch wishlist from Firestore based on class code
- * Returns array of allowed sites for the class
+ * Fetch class details from Firestore based on class code.
+ * Returns an object with the class name, wishlist array, and a found boolean indicator.
  */
-async function fetchClassWishlist(classCode) {
-  if (!classCode) return [];
+async function fetchClassDetails(classCode) {
+  if (!classCode) return { found: false, wishlist: [], className: "" };
 
   const accessToken = await getFirebaseAccessToken();
-  if (!accessToken || !self.CONFIG || !self.CONFIG.FIREBASE) return [];
+  if (!accessToken || !self.CONFIG || !self.CONFIG.FIREBASE) {
+    return { found: false, wishlist: [], className: "" };
+  }
 
   try {
     const projectId = self.CONFIG.FIREBASE.projectId;
@@ -805,27 +837,33 @@ async function fetchClassWishlist(classCode) {
     });
 
     if (!res.ok) {
-      console.warn('[fetchClassWishlist] Firestore query failed', res.status);
-      return [];
+      console.warn('[fetchClassDetails] Firestore query failed', res.status);
+      return { found: false, wishlist: [], className: "" };
     }
 
     const data = await res.json();
 
-    if (data && Array.isArray(data) && data.length > 0) {
+    if (data && Array.isArray(data) && data.length > 0 && data[0].document) {
       const doc = data[0].document;
       const wishlistField = doc.fields?.wishlist?.arrayValue?.values;
-      if (wishlistField && Array.isArray(wishlistField)) {
-        const wishlist = wishlistField.map(item => item.stringValue).filter(Boolean);
-        console.log('[fetchClassWishlist] Found wishlist for class', classCode, wishlist);
-        return wishlist;
-      }
+      const classNameField = doc.fields?.name?.stringValue;
+      const imageUrlField = doc.fields?.imageUrl?.stringValue;
+
+      const wishlist = wishlistField && Array.isArray(wishlistField)
+        ? wishlistField.map(item => item.stringValue).filter(Boolean)
+        : [];
+      const className = classNameField || "";
+      const imageUrl = imageUrlField || "";
+
+      console.log('[fetchClassDetails] Found details for class', classCode, className, wishlist, imageUrl);
+      return { found: true, wishlist, className, imageUrl };
     }
 
-    console.log('[fetchClassWishlist] No wishlist found for class', classCode);
-    return [];
+    console.log('[fetchClassDetails] No class document found for class code', classCode);
+    return { found: false, wishlist: [], className: "" };
   } catch (err) {
-    console.warn('[fetchClassWishlist] error', err);
-    return [];
+    console.warn('[fetchClassDetails] error', err);
+    return { found: false, wishlist: [], className: "" };
   }
 }
 
@@ -857,15 +895,23 @@ async function getCombinedWhitelist() {
       combined = [...combined, ...classWishlistCache.wishlist];
     } else {
       // Fetch fresh wishlist from Firestore
-      console.log('[getCombinedWhitelist] Fetching wishlist for class:', studentInfo.classCode);
-      const classWishlist = await fetchClassWishlist(studentInfo.classCode);
-      combined = [...combined, ...classWishlist];
+      console.log('[getCombinedWhitelist] Fetching details for class:', studentInfo.classCode);
+      const details = await fetchClassDetails(studentInfo.classCode);
+      combined = [...combined, ...details.wishlist];
+
+      // Asynchronously self-heal/update the stored className if we found it
+      if (details.found && details.className && studentInfo.className !== details.className) {
+        studentInfo.className = details.className;
+        await chrome.storage.local.set({ studentInfo });
+      }
 
       // Cache the result
       await chrome.storage.local.set({
         classWishlistCache: {
           classCode: studentInfo.classCode,
-          wishlist: classWishlist,
+          wishlist: details.wishlist,
+          className: details.className,
+          imageUrl: details.imageUrl || "",
           timestamp: now
         }
       });
@@ -947,8 +993,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const classCode = requestedClassCode || studentInfo.classCode || '';
 
       if (classCode) {
-        const wishlist = await fetchClassWishlist(classCode);
-        if (!wishlist.length) {
+        const details = await fetchClassDetails(classCode);
+        if (!details.found) {
           sendResponse({
             success: false,
             message: `Class code "${classCode}" was not found in Firestore.`,
@@ -957,17 +1003,193 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
+        const { wishlist, className, imageUrl } = details;
+
+        // Retrieve current studentInfo to preserve existing fields like rollNumber
+        const { studentInfo: currentInfo = {} } = await chrome.storage.local.get('studentInfo');
+        const updatedStudentInfo = {
+          ...currentInfo,
+          classCode,
+          className: className || `Class ${classCode}`
+        };
+
         await chrome.storage.local.set({
+          studentInfo: updatedStudentInfo,
           whitelist: withRequiredRules(wishlist),
           classWishlistCache: {
             classCode,
             wishlist,
+            className,
+            imageUrl: imageUrl || "",
             timestamp: Date.now()
           }
         });
-        sendResponse({ success: true, wishlist, classCode });
+        sendResponse({ success: true, wishlist, classCode, className, imageUrl });
       } else {
         sendResponse({ success: false, message: 'No class code set' });
+      }
+    } else if (message && message.type === "getPhoneHint") {
+      const admissionNo = String(message.admissionNo || '').trim();
+      const classCode = String(message.classCode || '').trim();
+      if (!admissionNo) {
+        sendResponse({ success: false, message: 'Missing parameters' });
+        return;
+      }
+      const accessToken = await getFirebaseAccessToken();
+      if (!accessToken || !self.CONFIG || !self.CONFIG.FIREBASE) {
+        sendResponse({ success: false, message: 'Firebase configuration error' });
+        return;
+      }
+      try {
+        const projectId = self.CONFIG.FIREBASE.projectId;
+        const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+        const queryPayload = {
+          structuredQuery: {
+            from: [{ collectionId: 'students' }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: 'admissionNo' },
+                op: 'IN',
+                value: {
+                  arrayValue: {
+                    values: [
+                      { stringValue: admissionNo },
+                      { stringValue: admissionNo + '\n' },
+                      { stringValue: admissionNo + '\r\n' },
+                      { stringValue: ' ' + admissionNo },
+                      { stringValue: admissionNo + ' ' }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify(queryPayload)
+        });
+        if (!res.ok) {
+          sendResponse({ success: false, message: 'Query request failed' });
+          return;
+        }
+        const data = await res.json();
+        let foundDoc = null;
+
+        if (data && Array.isArray(data)) {
+          for (const item of data) {
+            if (item.document) {
+              foundDoc = item.document;
+              break;
+            }
+          }
+        }
+
+        if (foundDoc) {
+          const nameField = foundDoc.fields?.name || foundDoc.fields?.['name '] || foundDoc.fields?.Name || foundDoc.fields?.['Name '];
+          const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
+          const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
+          const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
+          const isMultiMode = Boolean(message.isMultiMode);
+          const hint = maskPhoneLastN(dbPhone, isMultiMode ? 2 : 5);
+          sendResponse({ success: true, hint, name: studentName });
+        } else {
+          sendResponse({ success: false, message: 'Student not found' });
+        }
+      } catch (err) {
+        sendResponse({ success: false, message: err.message });
+      }
+    } else if (message && message.type === "verifyStudent") {
+      const admissionNo = String(message.admissionNo || '').trim();
+      const phoneNumber = String(message.phoneNumber || '').trim();
+      const classCode = String(message.classCode || '').trim();
+      if (!admissionNo || !phoneNumber) {
+        sendResponse({ success: false, message: 'Missing parameters' });
+        return;
+      }
+      const accessToken = await getFirebaseAccessToken();
+      if (!accessToken || !self.CONFIG || !self.CONFIG.FIREBASE) {
+        sendResponse({ success: false, message: 'Firebase configuration error' });
+        return;
+      }
+      try {
+        const projectId = self.CONFIG.FIREBASE.projectId;
+        const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+        const queryPayload = {
+          structuredQuery: {
+            from: [{ collectionId: 'students' }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: 'admissionNo' },
+                op: 'IN',
+                value: {
+                  arrayValue: {
+                    values: [
+                      { stringValue: admissionNo },
+                      { stringValue: admissionNo + '\n' },
+                      { stringValue: admissionNo + '\r\n' },
+                      { stringValue: ' ' + admissionNo },
+                      { stringValue: admissionNo + ' ' }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify(queryPayload)
+        });
+        if (!res.ok) {
+          sendResponse({ success: false, message: 'Query request failed' });
+          return;
+        }
+        const data = await res.json();
+        let foundDoc = null;
+
+        if (data && Array.isArray(data)) {
+          for (const item of data) {
+            if (item.document) {
+              foundDoc = item.document;
+              break;
+            }
+          }
+        }
+
+        if (foundDoc) {
+          const nameField = foundDoc.fields?.name || foundDoc.fields?.['name '] || foundDoc.fields?.Name || foundDoc.fields?.['Name '];
+          const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
+          const classField = foundDoc.fields?.class || foundDoc.fields?.['class '] || foundDoc.fields?.Class || foundDoc.fields?.['Class '];
+          const studentClass = classField && classField.stringValue ? classField.stringValue.trim() : "";
+          
+          const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
+          const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
+          const enteredPhone = phoneNumber.replace(/\s+/g, '');
+          const isMultiMode = Boolean(message.isMultiMode);
+
+          const matches = isMultiMode ? dbPhone.startsWith(enteredPhone) : (dbPhone === enteredPhone);
+          
+          if (matches) {
+            resetInactivityTimer();
+            sendResponse({ success: true, name: studentName, class: studentClass });
+          } else {
+            const hint = maskPhoneLastN(dbPhone, 2);
+            sendResponse({ success: false, message: isMultiMode ? 'Phone number prefix does not match' : 'Phone number does not match', hint });
+          }
+        } else {
+          sendResponse({ success: false, message: 'Student not found' });
+        }
+      } catch (err) {
+        sendResponse({ success: false, message: err.message });
       }
     } else if (message && message.type === "logChatGptPrompt") {
       // Legacy handler — kept for backward compatibility, delegates to logAiPrompt logic
@@ -1159,6 +1381,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const url = chrome.runtime.getURL(`student_dashboard.html?tab=${tabName}`);
       chrome.tabs.create({ url });
       sendResponse({ success: true });
+    } else if (message && message.type === "userActivity") {
+      resetInactivityTimer();
+      sendResponse({ success: true });
     } else {
       sendResponse(undefined);
     }
@@ -1338,4 +1563,51 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
     logVisit(tab.url, tab.title || 'Untitled', tabId, allowed);
   } catch (e) { }
+});
+
+let logoutTimeoutId = null;
+
+function resetInactivityTimer() {
+  if (logoutTimeoutId) {
+    clearTimeout(logoutTimeoutId);
+  }
+  logoutTimeoutId = setTimeout(async () => {
+    console.log("[Inactivity] 5 minutes of inactivity reached. Logging out...");
+    await performBackgroundLogout();
+  }, 300000);
+}
+
+async function performBackgroundLogout() {
+  if (logoutTimeoutId) {
+    clearTimeout(logoutTimeoutId);
+    logoutTimeoutId = null;
+  }
+  const res = await chrome.storage.local.get('studentInfo');
+  let studentInfo = res.studentInfo || {};
+  if (studentInfo.loggedStudents && studentInfo.loggedStudents.length > 0) {
+    studentInfo.loggedStudents = [];
+    studentInfo.studentName = "";
+    studentInfo.rollNumber = "";
+    studentInfo.admissionNumber = "";
+    studentInfo.guardianPhone = "";
+    await chrome.storage.local.set({ studentInfo });
+    
+    // Notify all tabs to reload/redirect
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      try {
+        chrome.tabs.sendMessage(tab.id, { type: 'autoLoggedOut' });
+      } catch (e) {
+        // Ignore errors for inactive tabs
+      }
+    }
+  }
+}
+
+// Check if any student is already logged in on startup to start the timer
+chrome.storage.local.get(['studentInfo'], (res) => {
+  const logged = res.studentInfo?.loggedStudents || [];
+  if (logged.length > 0) {
+    resetInactivityTimer();
+  }
 });

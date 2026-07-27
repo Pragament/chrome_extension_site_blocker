@@ -235,7 +235,7 @@ function initFab() {
 
       // Update panel info
       const display = studentInfo.classCode 
-        ? `Class: ${studentInfo.classCode} | Roll: ${studentInfo.rollNumber || '—'} | PC: ${pcCode || '—'}`
+        ? `Class: ${studentInfo.className || studentInfo.classCode} | Roll: ${studentInfo.rollNumber || '—'} | PC: ${pcCode || '—'}`
         : `Class: — | Roll: — | PC: ${pcCode || '—'}`;
 
       document.getElementById('currentInfo').textContent = display;
@@ -289,7 +289,13 @@ function initFab() {
       }
 
       console.debug('[site-blocker] saving studentInfo to chrome.storage.local');
-      await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
+      await chrome.storage.local.set({
+        studentInfo: {
+          classCode: code,
+          className: refreshResponse.className || '',
+          rollNumber: roll
+        }
+      });
 
       console.debug('[site-blocker] wishlist refresh completed, refreshing panel display');
       await updateDisplay();
@@ -339,11 +345,13 @@ function initFab() {
   });
 
   // Auto-update button if changed from options page
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
-      updateDisplay();
-    }
-  });
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
+        updateDisplay();
+      }
+    });
+  }
 }
 
 // ============================================================
@@ -1010,3 +1018,28 @@ function initGeminiPromptLogger() {
     prepareAndLog();
   }, true);
 }
+
+// ============================================================
+// Inactivity Auto-Logout Tracker
+// ============================================================
+(function initInactivityTracker() {
+  let lastHeartbeatTime = 0;
+  function sendActivityHeartbeat() {
+    const now = Date.now();
+    if (now - lastHeartbeatTime > 2000) {
+      lastHeartbeatTime = now;
+      chrome.runtime.sendMessage({ type: 'userActivity' }).catch(() => {});
+    }
+  }
+
+  const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+  events.forEach(event => {
+    window.addEventListener(event, sendActivityHeartbeat, { passive: true });
+  });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === 'autoLoggedOut') {
+      window.location.reload();
+    }
+  });
+})();

@@ -8,6 +8,77 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginBtn = document.getElementById('homepage-login-btn');
     const logoutAllBtn = document.getElementById('homepage-logout-all-btn');
 
+    const modeSingleBtn = document.getElementById('login-mode-single');
+    const modeMultiBtn = document.getElementById('login-mode-multi');
+    let isMultiMode = false;
+
+    function applyLoginMode(multi) {
+        isMultiMode = multi;
+        if (multi) {
+            if (modeMultiBtn) {
+                modeMultiBtn.style.background = 'var(--secondary)';
+                modeMultiBtn.style.color = 'white';
+                modeMultiBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            }
+            if (modeSingleBtn) {
+                modeSingleBtn.style.background = 'transparent';
+                modeSingleBtn.style.color = '#64748b';
+                modeSingleBtn.style.boxShadow = 'none';
+            }
+            if (guardianPhoneInput) {
+                guardianPhoneInput.placeholder = 'Guardian Phone (5 digits)';
+                guardianPhoneInput.maxLength = 5;
+            }
+            if (loginBtn) {
+                loginBtn.textContent = 'Add Student';
+            }
+        } else {
+            if (modeSingleBtn) {
+                modeSingleBtn.style.background = 'var(--secondary)';
+                modeSingleBtn.style.color = 'white';
+                modeSingleBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            }
+            if (modeMultiBtn) {
+                modeMultiBtn.style.background = 'transparent';
+                modeMultiBtn.style.color = '#64748b';
+                modeMultiBtn.style.boxShadow = 'none';
+            }
+            if (guardianPhoneInput) {
+                guardianPhoneInput.placeholder = 'Guardian Phone (10 digits)';
+                guardianPhoneInput.maxLength = 10;
+            }
+            if (loginBtn) {
+                loginBtn.textContent = 'Login';
+            }
+        }
+        
+        // Save to storage
+        if (chrome && chrome.storage) {
+            chrome.storage.local.get(['studentInfo'], (res) => {
+                const currentInfo = res.studentInfo || {};
+                currentInfo.loginMode = multi ? 'multi' : 'single';
+                chrome.storage.local.set({ studentInfo: currentInfo });
+            });
+        } else {
+            const savedStr = localStorage.getItem('studentInfo');
+            const currentInfo = savedStr ? JSON.parse(savedStr) : {};
+            currentInfo.loginMode = multi ? 'multi' : 'single';
+            localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
+        }
+        
+        // Clear inputs and hint when switching modes
+        if (guardianPhoneInput) guardianPhoneInput.value = '';
+        const hintContainer = document.getElementById('homepage-phone-hint-container');
+        if (hintContainer) hintContainer.style.display = 'none';
+    }
+
+    if (modeSingleBtn) {
+        modeSingleBtn.addEventListener('click', () => applyLoginMode(false));
+    }
+    if (modeMultiBtn) {
+        modeMultiBtn.addEventListener('click', () => applyLoginMode(true));
+    }
+
     // Helper to update iframe URL
     function updateIframeSrc(info) {
         if (iframe) {
@@ -170,20 +241,34 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Please enter Admission Number and Guardian Phone.');
             return;
         }
+
+        const cleanPh = ph.replace(/\s+/g, '');
+        if (isMultiMode) {
+            if (cleanPh.length !== 5) {
+                alert('Please enter exactly the first 5 digits of the Guardian Phone.');
+                return;
+            }
+        } else {
+            if (cleanPh.length !== 10) {
+                alert('Please enter exactly a 10-digit Guardian Phone.');
+                return;
+            }
+        }
         
         const errorEl = document.getElementById('homepage-student-error');
         if (errorEl) errorEl.style.display = 'none';
         
         let result = null;
         if (!chrome || !chrome.storage) {
-            result = await verifyStudentDirectly(adm, ph, classCode);
+            result = await verifyStudentDirectly(adm, ph, classCode, isMultiMode);
         } else {
             try {
                 result = await chrome.runtime.sendMessage({
                     type: 'verifyStudent',
                     admissionNo: adm,
                     phoneNumber: ph,
-                    classCode: classCode
+                    classCode: classCode,
+                    isMultiMode: isMultiMode
                 });
             } catch (err) {
                 console.error("Failed to query student via background:", err);
@@ -202,10 +287,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const savedStudentInfoStr = localStorage.getItem('studentInfo');
                 let studentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
                 
-                if (!studentInfo.loggedStudents) studentInfo.loggedStudents = [];
-                if (studentInfo.loggedStudents.some(s => s.admissionNumber === adm)) {
-                    alert('Student is already logged in.');
-                    return;
+                if (isMultiMode) {
+                    if (!studentInfo.loggedStudents) studentInfo.loggedStudents = [];
+                    if (studentInfo.loggedStudents.some(s => s.admissionNumber === adm)) {
+                        alert('Student is already logged in.');
+                        return;
+                    }
+                } else {
+                    studentInfo.loggedStudents = [];
                 }
                 
                 studentInfo.loggedStudents.push({
@@ -234,10 +323,15 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 chrome.storage.local.get(['studentInfo'], (res) => {
                     let studentInfo = res.studentInfo || {};
-                    if (!studentInfo.loggedStudents) studentInfo.loggedStudents = [];
-                    if (studentInfo.loggedStudents.some(s => s.admissionNumber === adm)) {
-                        alert('Student is already logged in.');
-                        return;
+                    
+                    if (isMultiMode) {
+                        if (!studentInfo.loggedStudents) studentInfo.loggedStudents = [];
+                        if (studentInfo.loggedStudents.some(s => s.admissionNumber === adm)) {
+                            alert('Student is already logged in.');
+                            return;
+                        }
+                    } else {
+                        studentInfo.loggedStudents = [];
                     }
                     
                     studentInfo.loggedStudents.push({
@@ -491,7 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function verifyStudentDirectly(admissionNo, phoneNumber, classCode) {
+    async function verifyStudentDirectly(admissionNo, phoneNumber, classCode, isMulti) {
         if (!admissionNo || !phoneNumber || !window.CONFIG || !window.CONFIG.FIREBASE) {
             return { success: false, message: "Missing config or parameters" };
         }
@@ -570,7 +664,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
                 const enteredPhone = phoneNumber.replace(/\s+/g, '');
 
-                if (dbPhone === enteredPhone) {
+                const matches = isMulti ? dbPhone.startsWith(enteredPhone) : (dbPhone === enteredPhone);
+
+                if (matches) {
                     return { success: true, name: studentName, class: studentClass };
                 } else {
                     const maskPhoneLastN = (phone, n) => {
@@ -581,7 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return masked + visible;
                     };
                     const hint = maskPhoneLastN(dbPhone, 2);
-                    return { success: false, message: "Phone number does not match", hint };
+                    return { success: false, message: isMulti ? "Phone number prefix does not match" : "Phone number does not match", hint };
                 }
             }
             return { success: false, message: "Student not found" };
@@ -591,7 +687,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function getPhoneHintDirectly(admissionNo, classCode) {
+    async function getPhoneHintDirectly(admissionNo, classCode, isMulti) {
         if (!admissionNo || !window.CONFIG || !window.CONFIG.FIREBASE) {
             return { success: false, message: "Missing config or parameters" };
         }
@@ -674,7 +770,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return masked + visible;
                 };
                 
-                const hint = maskPhoneLastN(dbPhone, 5);
+                const hint = maskPhoneLastN(dbPhone, isMulti ? 2 : 5);
                 return { success: true, hint, name: studentName };
             }
             return { success: false, message: "Student not found" };
@@ -698,13 +794,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let result = null;
         if (!chrome || !chrome.storage) {
-            result = await getPhoneHintDirectly(adm, classCode);
+            result = await getPhoneHintDirectly(adm, classCode, isMultiMode);
         } else {
             try {
                 result = await chrome.runtime.sendMessage({
                     type: 'getPhoneHint',
                     admissionNo: adm,
-                    classCode: classCode
+                    classCode: classCode,
+                    isMultiMode: isMultiMode
                 });
             } catch (err) {
                 console.error("Failed to fetch phone hint via background:", err);
@@ -738,6 +835,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const studentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
         const savedWishlistStr = localStorage.getItem('classWishlistCache');
         const classWishlistCache = savedWishlistStr ? JSON.parse(savedWishlistStr) : null;
+        
+        applyLoginMode(studentInfo.loginMode === 'multi');
         
         // Populate inputs
         if (classSelect && studentInfo.grade) {
@@ -877,6 +976,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }).join('');
             }
         }
+
+        applyLoginMode(result.studentInfo?.loginMode === 'multi');
 
         // Display student badge if configured
         renderLoggedStudents(result.studentInfo);

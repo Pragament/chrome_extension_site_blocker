@@ -1094,7 +1094,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
           const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
           const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
-          const hint = maskPhoneLastN(dbPhone, 5);
+          const isMultiMode = Boolean(message.isMultiMode);
+          const hint = maskPhoneLastN(dbPhone, isMultiMode ? 2 : 5);
           sendResponse({ success: true, hint, name: studentName });
         } else {
           sendResponse({ success: false, message: 'Student not found' });
@@ -1173,13 +1174,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
           const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
           const enteredPhone = phoneNumber.replace(/\s+/g, '');
+          const isMultiMode = Boolean(message.isMultiMode);
+
+          const matches = isMultiMode ? dbPhone.startsWith(enteredPhone) : (dbPhone === enteredPhone);
           
-          if (dbPhone === enteredPhone) {
+          if (matches) {
             resetInactivityTimer();
             sendResponse({ success: true, name: studentName, class: studentClass });
           } else {
             const hint = maskPhoneLastN(dbPhone, 2);
-            sendResponse({ success: false, message: 'Phone number does not match', hint });
+            sendResponse({ success: false, message: isMultiMode ? 'Phone number prefix does not match' : 'Phone number does not match', hint });
           }
         } else {
           sendResponse({ success: false, message: 'Student not found' });

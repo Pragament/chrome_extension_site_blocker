@@ -174,6 +174,14 @@ function sanitizeFirestoreDocId(value) {
     .slice(0, 80) || 'unknown';
 }
 
+function maskPhoneLastN(phone, n) {
+  const cleaned = String(phone || '').trim().replace(/\r?\n|\r/g, '');
+  if (cleaned.length <= n) return cleaned;
+  const visible = cleaned.slice(-n);
+  const masked = '*'.repeat(cleaned.length - n);
+  return masked + visible;
+}
+
 function getCodeHelpRequestId({ classCode, rollNumber, pageUrl }) {
   return [
     sanitizeFirestoreDocId(classCode),
@@ -571,6 +579,34 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
   const projectId = self.CONFIG.FIREBASE.projectId;
   const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
 
+  const rollNumbers = rollNumber.split('-').map(r => r.trim()).filter(Boolean);
+  if (rollNumbers.length > 1) {
+    rollNumbers.push(rollNumber);
+  }
+
+  let rollFilter;
+  if (rollNumbers.length > 1) {
+    rollFilter = {
+      fieldFilter: {
+        field: { fieldPath: "rollNumber" },
+        op: "IN",
+        value: {
+          arrayValue: {
+            values: rollNumbers.map(r => ({ stringValue: r }))
+          }
+        }
+      }
+    };
+  } else {
+    rollFilter = {
+      fieldFilter: {
+        field: { fieldPath: "rollNumber" },
+        op: "EQUAL",
+        value: { stringValue: rollNumber }
+      }
+    };
+  }
+
   const queryPayload = {
     structuredQuery: {
       from: [{ collectionId: "questions" }],
@@ -585,13 +621,7 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
                 value: { stringValue: classCode }
               }
             },
-            {
-              fieldFilter: {
-                field: { fieldPath: "rollNumber" },
-                op: "EQUAL",
-                value: { stringValue: rollNumber }
-              }
-            }
+            rollFilter
           ]
         }
       },
@@ -998,10 +1028,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else {
         sendResponse({ success: false, message: 'No class code set' });
       }
-    } else if (message && message.type === "verifyStudent") {
+    } else if (message && message.type === "getPhoneHint") {
       const admissionNo = String(message.admissionNo || '').trim();
-      const phoneNumber = String(message.phoneNumber || '').trim();
-      if (!admissionNo || !phoneNumber) {
+      const classCode = String(message.classCode || '').trim();
+      if (!admissionNo) {
         sendResponse({ success: false, message: 'Missing parameters' });
         return;
       }
@@ -1018,16 +1048,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             from: [{ collectionId: 'students' }],
             where: {
               fieldFilter: {
-                field: { fieldPath: 'phoneNumber' },
+                field: { fieldPath: 'admissionNo' },
                 op: 'IN',
                 value: {
                   arrayValue: {
                     values: [
-                      { stringValue: phoneNumber },
-                      { stringValue: phoneNumber + '\n' },
-                      { stringValue: phoneNumber + '\r\n' },
-                      { stringValue: ' ' + phoneNumber },
-                      { stringValue: phoneNumber + ' ' }
+                      { stringValue: admissionNo },
+                      { stringValue: admissionNo + '\n' },
+                      { stringValue: admissionNo + '\r\n' },
+                      { stringValue: ' ' + admissionNo },
+                      { stringValue: admissionNo + ' ' }
                     ]
                   }
                 }
@@ -1049,26 +1079,108 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         const data = await res.json();
         let foundDoc = null;
-        const targetAdmissionNo = admissionNo.trim();
 
         if (data && Array.isArray(data)) {
           for (const item of data) {
             if (item.document) {
-              const doc = item.document;
-              const dbAdmissionNo = String(doc.fields?.admissionNo?.stringValue || '').trim();
-              if (dbAdmissionNo === targetAdmissionNo) {
-                foundDoc = doc;
-                break;
-              }
+              foundDoc = item.document;
+              break;
             }
           }
         }
 
         if (foundDoc) {
-          const studentName = foundDoc.fields?.name?.stringValue || "";
+          const nameField = foundDoc.fields?.name || foundDoc.fields?.['name '] || foundDoc.fields?.Name || foundDoc.fields?.['Name '];
+          const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
+          const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
+          const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
+          const hint = maskPhoneLastN(dbPhone, 5);
+          sendResponse({ success: true, hint, name: studentName });
+        } else {
+          sendResponse({ success: false, message: 'Student not found' });
+        }
+      } catch (err) {
+        sendResponse({ success: false, message: err.message });
+      }
+    } else if (message && message.type === "verifyStudent") {
+      const admissionNo = String(message.admissionNo || '').trim();
+      const phoneNumber = String(message.phoneNumber || '').trim();
+      const classCode = String(message.classCode || '').trim();
+      if (!admissionNo || !phoneNumber) {
+        sendResponse({ success: false, message: 'Missing parameters' });
+        return;
+      }
+      const accessToken = await getFirebaseAccessToken();
+      if (!accessToken || !self.CONFIG || !self.CONFIG.FIREBASE) {
+        sendResponse({ success: false, message: 'Firebase configuration error' });
+        return;
+      }
+      try {
+        const projectId = self.CONFIG.FIREBASE.projectId;
+        const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+        const queryPayload = {
+          structuredQuery: {
+            from: [{ collectionId: 'students' }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: 'admissionNo' },
+                op: 'IN',
+                value: {
+                  arrayValue: {
+                    values: [
+                      { stringValue: admissionNo },
+                      { stringValue: admissionNo + '\n' },
+                      { stringValue: admissionNo + '\r\n' },
+                      { stringValue: ' ' + admissionNo },
+                      { stringValue: admissionNo + ' ' }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify(queryPayload)
+        });
+        if (!res.ok) {
+          sendResponse({ success: false, message: 'Query request failed' });
+          return;
+        }
+        const data = await res.json();
+        let foundDoc = null;
+
+        if (data && Array.isArray(data)) {
+          for (const item of data) {
+            if (item.document) {
+              foundDoc = item.document;
+              break;
+            }
+          }
+        }
+
+        if (foundDoc) {
+          const nameField = foundDoc.fields?.name || foundDoc.fields?.['name '] || foundDoc.fields?.Name || foundDoc.fields?.['Name '];
+          const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
           const classField = foundDoc.fields?.class || foundDoc.fields?.['class '] || foundDoc.fields?.Class || foundDoc.fields?.['Class '];
           const studentClass = classField && classField.stringValue ? classField.stringValue.trim() : "";
-          sendResponse({ success: true, name: studentName, class: studentClass });
+          
+          const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
+          const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
+          const enteredPhone = phoneNumber.replace(/\s+/g, '');
+          
+          if (dbPhone === enteredPhone) {
+            resetInactivityTimer();
+            sendResponse({ success: true, name: studentName, class: studentClass });
+          } else {
+            const hint = maskPhoneLastN(dbPhone, 2);
+            sendResponse({ success: false, message: 'Phone number does not match', hint });
+          }
         } else {
           sendResponse({ success: false, message: 'Student not found' });
         }
@@ -1265,6 +1377,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const url = chrome.runtime.getURL(`student_dashboard.html?tab=${tabName}`);
       chrome.tabs.create({ url });
       sendResponse({ success: true });
+    } else if (message && message.type === "userActivity") {
+      resetInactivityTimer();
+      sendResponse({ success: true });
     } else {
       sendResponse(undefined);
     }
@@ -1444,4 +1559,51 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
     logVisit(tab.url, tab.title || 'Untitled', tabId, allowed);
   } catch (e) { }
+});
+
+let logoutTimeoutId = null;
+
+function resetInactivityTimer() {
+  if (logoutTimeoutId) {
+    clearTimeout(logoutTimeoutId);
+  }
+  logoutTimeoutId = setTimeout(async () => {
+    console.log("[Inactivity] 5 minutes of inactivity reached. Logging out...");
+    await performBackgroundLogout();
+  }, 300000);
+}
+
+async function performBackgroundLogout() {
+  if (logoutTimeoutId) {
+    clearTimeout(logoutTimeoutId);
+    logoutTimeoutId = null;
+  }
+  const res = await chrome.storage.local.get('studentInfo');
+  let studentInfo = res.studentInfo || {};
+  if (studentInfo.loggedStudents && studentInfo.loggedStudents.length > 0) {
+    studentInfo.loggedStudents = [];
+    studentInfo.studentName = "";
+    studentInfo.rollNumber = "";
+    studentInfo.admissionNumber = "";
+    studentInfo.guardianPhone = "";
+    await chrome.storage.local.set({ studentInfo });
+    
+    // Notify all tabs to reload/redirect
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      try {
+        chrome.tabs.sendMessage(tab.id, { type: 'autoLoggedOut' });
+      } catch (e) {
+        // Ignore errors for inactive tabs
+      }
+    }
+  }
+}
+
+// Check if any student is already logged in on startup to start the timer
+chrome.storage.local.get(['studentInfo'], (res) => {
+  const logged = res.studentInfo?.loggedStudents || [];
+  if (logged.length > 0) {
+    resetInactivityTimer();
+  }
 });

@@ -657,9 +657,9 @@ async function loadStudentInfo() {
         pushScreen("homeScreen");
       }
     } else {
-      console.warn("[Init] Student credentials missing. Redirecting to options.html.");
+      console.warn("[Init] Student credentials missing. Redirecting to homepage.html.");
       alert("Please configure your Class Code and Roll Number first.");
-      window.location.href = chrome.runtime.getURL("options.html");
+      window.location.href = chrome.runtime.getURL("homepage.html");
     }
   } catch (err) {
     console.error("[Init] Error in loadStudentInfo:", err);
@@ -676,3 +676,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachEventListeners();
   await initializeDashboard();
 });
+
+// ============================================================
+// Inactivity Auto-Logout Tracker
+// ============================================================
+(function initInactivityTracker() {
+  let lastHeartbeatTime = 0;
+  function sendActivityHeartbeat() {
+    const now = Date.now();
+    if (now - lastHeartbeatTime > 2000) {
+      lastHeartbeatTime = now;
+      chrome.runtime.sendMessage({ type: 'userActivity' }).catch(() => {});
+    }
+  }
+
+  const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+  events.forEach(event => {
+    window.addEventListener(event, sendActivityHeartbeat, { passive: true });
+  });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === 'autoLoggedOut') {
+      window.location.reload();
+    }
+  });
+})();

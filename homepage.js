@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const classCodeInput = document.getElementById('homepage-class-code-input');
     const admissionInput = document.getElementById('homepage-admission-input');
     const guardianPhoneInput = document.getElementById('homepage-guardian-phone-input');
+    const loginBtn = document.getElementById('homepage-login-btn');
+    const logoutAllBtn = document.getElementById('homepage-logout-all-btn');
 
     // Helper to update iframe URL
     function updateIframeSrc(info) {
@@ -55,63 +57,290 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function updateCombinedStudentInfo(studentInfo) {
+        if (!studentInfo.loggedStudents || !Array.isArray(studentInfo.loggedStudents)) {
+            studentInfo.loggedStudents = [];
+        }
+        
+        if (studentInfo.loggedStudents.length === 0) {
+            studentInfo.studentName = "";
+            studentInfo.admissionNumber = "";
+            studentInfo.guardianPhone = "";
+            studentInfo.rollNumber = "";
+        } else {
+            studentInfo.studentName = studentInfo.loggedStudents.map(s => s.studentName).join(" & ");
+            studentInfo.admissionNumber = studentInfo.loggedStudents.map(s => s.admissionNumber).join("-");
+            studentInfo.guardianPhone = studentInfo.loggedStudents.map(s => s.guardianPhone).join("-");
+            studentInfo.rollNumber = studentInfo.loggedStudents.map(s => s.rollNumber).filter(Boolean).join("-");
+        }
+        return studentInfo;
+    }
+
+    function renderLoggedStudents(studentInfo) {
+        const badgesContainer = document.getElementById('homepage-student-badges');
+        const greetingEl = document.getElementById('homepage-student-greeting');
+        const logoutAllEl = document.getElementById('homepage-logout-all-btn');
+        const infoEl = document.getElementById('homepage-student-info');
+        const infoContainer = document.getElementById('homepage-student-info-container');
+        
+        if (!studentInfo || !studentInfo.loggedStudents || !Array.isArray(studentInfo.loggedStudents) || studentInfo.loggedStudents.length === 0) {
+            if (badgesContainer) badgesContainer.innerHTML = '';
+            if (greetingEl) {
+                greetingEl.style.display = 'none';
+            }
+            if (logoutAllEl) {
+                logoutAllEl.style.display = 'none';
+            }
+            if (infoContainer) {
+                if (studentInfo && studentInfo.classCode) {
+                    infoContainer.style.display = 'flex';
+                    if (infoEl) infoEl.textContent = `Class: ${studentInfo.className || studentInfo.classCode}`;
+                } else {
+                    infoContainer.style.display = 'none';
+                }
+            }
+            return;
+        }
+
+        if (infoContainer) infoContainer.style.display = 'flex';
+        if (infoEl && studentInfo.classCode) {
+            infoEl.textContent = `Class: ${studentInfo.className || studentInfo.classCode}`;
+        }
+        
+        if (greetingEl) {
+            greetingEl.style.display = 'none';
+        }
+        
+        if (logoutAllEl) {
+            logoutAllEl.style.display = 'none';
+        }
+        
+        if (badgesContainer) {
+            badgesContainer.innerHTML = studentInfo.loggedStudents.map(student => {
+                return `
+                    <span class="student-badge-info" style="background: #f0fdf4; border-color: #22c55e; color: #15803d; padding: 6px 16px; display: inline-flex; align-items: center; gap: 12px; border-radius: 30px; border: 2px solid #22c55e; font-weight: 700; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                        <span>${student.studentName}</span>
+                        <button class="remove-student-btn" data-admission="${student.admissionNumber}" style="background: #ef4444; color: white; border: none; padding: 4px 10px; border-radius: 15px; cursor: pointer; font-size: 0.75rem; font-weight: bold; transition: background-color 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); line-height: 1;">Logout</button>
+                    </span>
+                `;
+            }).join('');
+            
+            badgesContainer.querySelectorAll('.remove-student-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const adm = e.target.getAttribute('data-admission');
+                    removeStudent(adm);
+                });
+            });
+        }
+    }
+
+    function removeStudent(admissionNumber) {
+        if (!chrome || !chrome.storage) {
+            const savedStudentInfoStr = localStorage.getItem('studentInfo');
+            let studentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
+            if (studentInfo.loggedStudents) {
+                studentInfo.loggedStudents = studentInfo.loggedStudents.filter(s => s.admissionNumber !== admissionNumber);
+                studentInfo = updateCombinedStudentInfo(studentInfo);
+                localStorage.setItem('studentInfo', JSON.stringify(studentInfo));
+                renderLoggedStudents(studentInfo);
+                updateIframeSrc(studentInfo);
+            }
+            return;
+        }
+        chrome.storage.local.get(['studentInfo'], (res) => {
+            let studentInfo = res.studentInfo || {};
+            if (studentInfo.loggedStudents) {
+                studentInfo.loggedStudents = studentInfo.loggedStudents.filter(s => s.admissionNumber !== admissionNumber);
+                studentInfo = updateCombinedStudentInfo(studentInfo);
+                chrome.storage.local.set({ studentInfo }, () => {
+                    renderLoggedStudents(studentInfo);
+                    updateIframeSrc(studentInfo);
+                });
+            }
+        });
+    }
+
+    async function performLoginFlow() {
+        const adm = admissionInput ? admissionInput.value.trim() : '';
+        const ph = guardianPhoneInput ? guardianPhoneInput.value.trim() : '';
+        const classCode = classCodeInput ? classCodeInput.value.trim() : '';
+        const roll = adm;
+        
+        if (!adm || !ph) {
+            alert('Please enter Admission Number and Guardian Phone.');
+            return;
+        }
+        
+        const errorEl = document.getElementById('homepage-student-error');
+        if (errorEl) errorEl.style.display = 'none';
+        
+        let result = null;
+        if (!chrome || !chrome.storage) {
+            result = await verifyStudentDirectly(adm, ph, classCode);
+        } else {
+            try {
+                result = await chrome.runtime.sendMessage({
+                    type: 'verifyStudent',
+                    admissionNo: adm,
+                    phoneNumber: ph,
+                    classCode: classCode
+                });
+            } catch (err) {
+                console.error("Failed to query student via background:", err);
+                result = { success: false, message: "Connection error" };
+            }
+        }
+        
+        if (result && result.success) {
+            const studentName = result.name || "";
+            const studentClass = result.class || "";
+            
+            const hintContainer = document.getElementById('homepage-phone-hint-container');
+            if (hintContainer) hintContainer.style.display = 'none';
+
+            if (!chrome || !chrome.storage) {
+                const savedStudentInfoStr = localStorage.getItem('studentInfo');
+                let studentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
+                
+                if (!studentInfo.loggedStudents) studentInfo.loggedStudents = [];
+                if (studentInfo.loggedStudents.some(s => s.admissionNumber === adm)) {
+                    alert('Student is already logged in.');
+                    return;
+                }
+                
+                studentInfo.loggedStudents.push({
+                    studentName,
+                    admissionNumber: adm,
+                    guardianPhone: ph,
+                    rollNumber: roll,
+                    grade: studentClass
+                });
+                
+                studentInfo = updateCombinedStudentInfo(studentInfo);
+                if (studentClass) {
+                    studentInfo.grade = studentClass;
+                }
+                
+                localStorage.setItem('studentInfo', JSON.stringify(studentInfo));
+                if (admissionInput) admissionInput.value = '';
+                if (guardianPhoneInput) guardianPhoneInput.value = '';
+                
+                if (classSelect && studentClass) {
+                    classSelect.value = studentClass;
+                }
+                
+                renderLoggedStudents(studentInfo);
+                updateIframeSrc(studentInfo);
+            } else {
+                chrome.storage.local.get(['studentInfo'], (res) => {
+                    let studentInfo = res.studentInfo || {};
+                    if (!studentInfo.loggedStudents) studentInfo.loggedStudents = [];
+                    if (studentInfo.loggedStudents.some(s => s.admissionNumber === adm)) {
+                        alert('Student is already logged in.');
+                        return;
+                    }
+                    
+                    studentInfo.loggedStudents.push({
+                        studentName,
+                        admissionNumber: adm,
+                        guardianPhone: ph,
+                        rollNumber: roll,
+                        grade: studentClass
+                    });
+                    
+                    studentInfo = updateCombinedStudentInfo(studentInfo);
+                    if (studentClass) {
+                        studentInfo.grade = studentClass;
+                    }
+                    
+                    chrome.storage.local.set({ studentInfo }, () => {
+                        if (admissionInput) admissionInput.value = '';
+                        if (guardianPhoneInput) guardianPhoneInput.value = '';
+                        
+                        if (classSelect && studentClass) {
+                            classSelect.value = studentClass;
+                        }
+                        
+                        renderLoggedStudents(studentInfo);
+                        updateIframeSrc(studentInfo);
+                    });
+                });
+            }
+        } else {
+            if (errorEl) {
+                errorEl.textContent = result?.message || 'Student not found';
+                errorEl.style.display = 'inline-block';
+            }
+            if (result && result.hint) {
+                const hintContainer = document.getElementById('homepage-phone-hint-container');
+                const hintEl = document.getElementById('homepage-phone-hint');
+                if (hintContainer && hintEl) {
+                    hintEl.textContent = `Registered Phone: ${result.hint}`;
+                    hintContainer.style.display = 'flex';
+                }
+            }
+        }
+    }
+ 
+    function logoutAllStudents() {
+        if (!chrome || !chrome.storage) {
+            const savedStudentInfoStr = localStorage.getItem('studentInfo');
+            let studentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
+            studentInfo.loggedStudents = [];
+            studentInfo = updateCombinedStudentInfo(studentInfo);
+            localStorage.setItem('studentInfo', JSON.stringify(studentInfo));
+            
+            if (admissionInput) admissionInput.value = '';
+            if (guardianPhoneInput) guardianPhoneInput.value = '';
+            
+            renderLoggedStudents(studentInfo);
+            updateIframeSrc(studentInfo);
+            return;
+        }
+        chrome.storage.local.get(['studentInfo'], (res) => {
+            let studentInfo = res.studentInfo || {};
+            studentInfo.loggedStudents = [];
+            studentInfo = updateCombinedStudentInfo(studentInfo);
+            chrome.storage.local.set({ studentInfo }, () => {
+                if (admissionInput) admissionInput.value = '';
+                if (guardianPhoneInput) guardianPhoneInput.value = '';
+                
+                renderLoggedStudents(studentInfo);
+                updateIframeSrc(studentInfo);
+            });
+        });
+    }
+ 
     // Always attach the event listener so it works even when testing locally
     if (classSelect) {
         classSelect.addEventListener('change', (e) => saveStudentInfo({ grade: e.target.value }));
     }
-    
-    function checkAndTriggerVerify() {
-        const adm = admissionInput ? admissionInput.value.trim() : '';
-        const ph = guardianPhoneInput ? guardianPhoneInput.value.trim() : '';
-        if (adm && ph) {
-            performStudentLookup(adm, ph);
-        } else {
-            const greetingEl = document.getElementById('homepage-student-greeting');
-            const errorEl = document.getElementById('homepage-student-error');
-            if (greetingEl) greetingEl.style.display = 'none';
-            if (errorEl) errorEl.style.display = 'none';
-
-            // Clear studentName from storage since inputs are not fully filled
-            if (!chrome || !chrome.storage) {
-                const savedStudentInfoStr = localStorage.getItem('studentInfo');
-                if (savedStudentInfoStr) {
-                    const currentInfo = JSON.parse(savedStudentInfoStr);
-                    delete currentInfo.studentName;
-                    localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
-                }
-            } else {
-                chrome.storage.local.get(['studentInfo'], (res) => {
-                    const currentInfo = res.studentInfo || {};
-                    delete currentInfo.studentName;
-                    chrome.storage.local.set({ studentInfo: currentInfo });
-                });
-            }
-        }
+ 
+    if (loginBtn) {
+        loginBtn.addEventListener('click', performLoginFlow);
     }
-
-    const triggerVerifyOnEnter = (e) => {
+    if (logoutAllBtn) {
+        logoutAllBtn.addEventListener('click', logoutAllStudents);
+    }
+ 
+    const triggerLoginOnEnter = (e) => {
         if (e.key === 'Enter') {
-            const val = e.target.value.trim();
-            const updateField = e.target.id === 'homepage-admission-input' ? { admissionNumber: val } : { guardianPhone: val };
-            saveStudentInfo(updateField);
-            checkAndTriggerVerify();
+            performLoginFlow();
         }
     };
-
+ 
     if (admissionInput) {
-        admissionInput.addEventListener('blur', (e) => {
-            saveStudentInfo({ admissionNumber: e.target.value.trim() });
-            checkAndTriggerVerify();
-        });
-        admissionInput.addEventListener('keydown', triggerVerifyOnEnter);
+        admissionInput.addEventListener('keydown', triggerLoginOnEnter);
+        admissionInput.addEventListener('blur', updatePhoneHint);
+        admissionInput.addEventListener('change', updatePhoneHint);
+        admissionInput.addEventListener('input', updatePhoneHint);
     }
-    
     if (guardianPhoneInput) {
-        guardianPhoneInput.addEventListener('blur', (e) => {
-            saveStudentInfo({ guardianPhone: e.target.value.trim() });
-            checkAndTriggerVerify();
-        });
-        guardianPhoneInput.addEventListener('keydown', triggerVerifyOnEnter);
+        guardianPhoneInput.addEventListener('keydown', triggerLoginOnEnter);
+    }
+    if (classCodeInput) {
+        classCodeInput.addEventListener('blur', updatePhoneHint);
+        classCodeInput.addEventListener('change', updatePhoneHint);
     }
 
     if (classCodeInput) {
@@ -262,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function verifyStudentDirectly(admissionNo, phoneNumber) {
+    async function verifyStudentDirectly(admissionNo, phoneNumber, classCode) {
         if (!admissionNo || !phoneNumber || !window.CONFIG || !window.CONFIG.FIREBASE) {
             return { success: false, message: "Missing config or parameters" };
         }
@@ -293,16 +522,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     from: [{ collectionId: "students" }],
                     where: {
                         fieldFilter: {
-                            field: { fieldPath: "phoneNumber" },
+                            field: { fieldPath: "admissionNo" },
                             op: "IN",
                             value: {
                                 arrayValue: {
                                     values: [
-                                        { stringValue: phoneNumber },
-                                        { stringValue: phoneNumber + "\n" },
-                                        { stringValue: phoneNumber + "\r\n" },
-                                        { stringValue: " " + phoneNumber },
-                                        { stringValue: phoneNumber + " " }
+                                        { stringValue: admissionNo },
+                                        { stringValue: admissionNo + "\n" },
+                                        { stringValue: admissionNo + "\r\n" },
+                                        { stringValue: " " + admissionNo },
+                                        { stringValue: admissionNo + " " }
                                     ]
                                 }
                             }
@@ -321,26 +550,39 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) return { success: false, message: "Query failed" };
             const data = await res.json();
             let foundDoc = null;
-            const targetAdmissionNo = admissionNo.trim();
 
             if (data && Array.isArray(data)) {
                 for (const item of data) {
                     if (item.document) {
-                        const doc = item.document;
-                        const dbAdmissionNo = String(doc.fields?.admissionNo?.stringValue || '').trim();
-                        if (dbAdmissionNo === targetAdmissionNo) {
-                            foundDoc = doc;
-                            break;
-                        }
+                        foundDoc = item.document;
+                        break;
                     }
                 }
             }
 
             if (foundDoc) {
-                const studentName = foundDoc.fields?.name?.stringValue || "";
+                const nameField = foundDoc.fields?.name || foundDoc.fields?.['name '] || foundDoc.fields?.Name || foundDoc.fields?.['Name '];
+                const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
                 const classField = foundDoc.fields?.class || foundDoc.fields?.['class '] || foundDoc.fields?.Class || foundDoc.fields?.['Class '];
                 const studentClass = classField && classField.stringValue ? classField.stringValue.trim() : "";
-                return { success: true, name: studentName, class: studentClass };
+                
+                const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
+                const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
+                const enteredPhone = phoneNumber.replace(/\s+/g, '');
+
+                if (dbPhone === enteredPhone) {
+                    return { success: true, name: studentName, class: studentClass };
+                } else {
+                    const maskPhoneLastN = (phone, n) => {
+                        const cleaned = String(phone || '').trim().replace(/\r?\n|\r/g, '');
+                        if (cleaned.length <= n) return cleaned;
+                        const visible = cleaned.slice(-n);
+                        const masked = '*'.repeat(cleaned.length - n);
+                        return masked + visible;
+                    };
+                    const hint = maskPhoneLastN(dbPhone, 2);
+                    return { success: false, message: "Phone number does not match", hint };
+                }
             }
             return { success: false, message: "Student not found" };
         } catch (e) {
@@ -349,108 +591,143 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function performStudentLookup(admissionNo, phoneNumber) {
-        const greetingEl = document.getElementById('homepage-student-greeting');
+    async function getPhoneHintDirectly(admissionNo, classCode) {
+        if (!admissionNo || !window.CONFIG || !window.CONFIG.FIREBASE) {
+            return { success: false, message: "Missing config or parameters" };
+        }
+        const apiKey = window.CONFIG.FIREBASE.apiKey;
+        const projectId = window.CONFIG.FIREBASE.projectId;
+        try {
+            const authRes = await fetch(`${window.CONFIG.FIREBASE.rest.identityToolkit}?key=${encodeURIComponent(apiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ returnSecureToken: true })
+            });
+            if (!authRes.ok) return { success: false, message: "Auth failed" };
+            const authJson = await authRes.json();
+            const refreshToken = authJson.refreshToken;
+
+            const tokenRes = await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(apiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken })
+            });
+            if (!tokenRes.ok) return { success: false, message: "Token exchange failed" };
+            const tokenJson = await tokenRes.json();
+            const accessToken = tokenJson.access_token;
+
+            const endpoint = `${window.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
+            const queryPayload = {
+                structuredQuery: {
+                    from: [{ collectionId: "students" }],
+                    where: {
+                        fieldFilter: {
+                            field: { fieldPath: "admissionNo" },
+                            op: "IN",
+                            value: {
+                                arrayValue: {
+                                    values: [
+                                        { stringValue: admissionNo },
+                                        { stringValue: admissionNo + "\n" },
+                                        { stringValue: admissionNo + "\r\n" },
+                                        { stringValue: " " + admissionNo },
+                                        { stringValue: admissionNo + " " }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`
+                },
+                body: JSON.stringify(queryPayload)
+            });
+            if (!res.ok) return { success: false, message: "Query failed" };
+            const data = await res.json();
+            let foundDoc = null;
+
+            if (data && Array.isArray(data)) {
+                for (const item of data) {
+                    if (item.document) {
+                        foundDoc = item.document;
+                        break;
+                    }
+                }
+            }
+
+            if (foundDoc) {
+                const nameField = foundDoc.fields?.name || foundDoc.fields?.['name '] || foundDoc.fields?.Name || foundDoc.fields?.['Name '];
+                const studentName = nameField && nameField.stringValue ? nameField.stringValue.trim() : "";
+                const phoneField = foundDoc.fields?.phoneNumber || foundDoc.fields?.['phoneNumber '] || foundDoc.fields?.PhoneNumber || foundDoc.fields?.['PhoneNumber '];
+                const dbPhone = String(phoneField && phoneField.stringValue ? phoneField.stringValue : '').trim().replace(/\r?\n|\r/g, '');
+                
+                const maskPhoneLastN = (phone, n) => {
+                    const cleaned = String(phone || '').trim().replace(/\r?\n|\r/g, '');
+                    if (cleaned.length <= n) return cleaned;
+                    const visible = cleaned.slice(-n);
+                    const masked = '*'.repeat(cleaned.length - n);
+                    return masked + visible;
+                };
+                
+                const hint = maskPhoneLastN(dbPhone, 5);
+                return { success: true, hint, name: studentName };
+            }
+            return { success: false, message: "Student not found" };
+        } catch (e) {
+            console.error("Direct student hint error:", e);
+            return { success: false, message: e.message };
+        }
+    }
+
+    async function updatePhoneHint() {
+        const adm = admissionInput ? admissionInput.value.trim() : '';
+        const classCode = classCodeInput ? classCodeInput.value.trim() : '';
+        const hintContainer = document.getElementById('homepage-phone-hint-container');
+        const hintEl = document.getElementById('homepage-phone-hint');
         const errorEl = document.getElementById('homepage-student-error');
-        const infoContainer = document.getElementById('homepage-student-info-container');
-        
-        if (!admissionNo || !phoneNumber) {
-            if (greetingEl) greetingEl.style.display = 'none';
-            if (errorEl) errorEl.style.display = 'none';
+
+        if (!adm) {
+            if (hintContainer) hintContainer.style.display = 'none';
             return;
         }
 
         let result = null;
         if (!chrome || !chrome.storage) {
-            result = await verifyStudentDirectly(admissionNo, phoneNumber);
+            result = await getPhoneHintDirectly(adm, classCode);
         } else {
             try {
                 result = await chrome.runtime.sendMessage({
-                    type: 'verifyStudent',
-                    admissionNo,
-                    phoneNumber
+                    type: 'getPhoneHint',
+                    admissionNo: adm,
+                    classCode: classCode
                 });
             } catch (err) {
-                console.error("Failed to query student via background:", err);
+                console.error("Failed to fetch phone hint via background:", err);
                 result = { success: false, message: "Connection error" };
             }
         }
 
         if (result && result.success) {
-            const studentName = result.name || "";
-            const studentClass = result.class || "";
-
-            if (greetingEl) {
-                greetingEl.textContent = `Hi, ${studentName}`;
-                greetingEl.style.display = 'inline-block';
-            }
-            if (errorEl) {
-                errorEl.style.display = 'none';
-            }
-            if (infoContainer) {
-                infoContainer.style.display = 'flex';
-            }
-
-            // Save verified info to storage and update class selection dropdown (grade)
-            if (!chrome || !chrome.storage) {
-                const savedStudentInfoStr = localStorage.getItem('studentInfo');
-                const currentInfo = savedStudentInfoStr ? JSON.parse(savedStudentInfoStr) : {};
-                currentInfo.studentName = studentName;
-                if (studentClass) {
-                    currentInfo.grade = studentClass;
-                }
-                localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
-                
-                // Update dropdown selection UI immediately and update iframe
-                if (classSelect && studentClass) {
-                    classSelect.value = studentClass;
-                }
-                updateIframeSrc(currentInfo);
-            } else {
-                chrome.storage.local.get(['studentInfo'], (res) => {
-                    const currentInfo = res.studentInfo || {};
-                    currentInfo.studentName = studentName;
-                    if (studentClass) {
-                        currentInfo.grade = studentClass;
-                    }
-                    chrome.storage.local.set({ studentInfo: currentInfo }, () => {
-                        // Update dropdown selection UI immediately and update iframe
-                        if (classSelect && studentClass) {
-                            classSelect.value = studentClass;
-                        }
-                        updateIframeSrc(currentInfo);
-                    });
-                });
+            if (errorEl) errorEl.style.display = 'none';
+            if (hintContainer && hintEl) {
+                hintEl.textContent = `Registered Phone: ${result.hint}`;
+                hintContainer.style.display = 'flex';
             }
         } else {
-            if (greetingEl) {
-                greetingEl.style.display = 'none';
-            }
+            if (hintContainer) hintContainer.style.display = 'none';
             if (errorEl) {
-                errorEl.textContent = 'Student not found';
+                errorEl.textContent = result?.message || 'Student not found';
                 errorEl.style.display = 'inline-block';
-            }
-            if (infoContainer) {
-                infoContainer.style.display = 'flex';
-            }
-            
-            // Clear verified studentName from storage
-            if (!chrome || !chrome.storage) {
-                const savedStudentInfoStr = localStorage.getItem('studentInfo');
-                if (savedStudentInfoStr) {
-                    const currentInfo = JSON.parse(savedStudentInfoStr);
-                    delete currentInfo.studentName;
-                    localStorage.setItem('studentInfo', JSON.stringify(currentInfo));
-                }
-            } else {
-                chrome.storage.local.get(['studentInfo'], (res) => {
-                    const currentInfo = res.studentInfo || {};
-                    delete currentInfo.studentName;
-                    chrome.storage.local.set({ studentInfo: currentInfo });
-                });
             }
         }
     }
+
+
 
 
     if (!chrome || !chrome.storage) {
@@ -469,38 +746,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (classCodeInput && studentInfo.classCode) {
             classCodeInput.value = studentInfo.classCode;
         }
-        if (admissionInput && studentInfo.admissionNumber) {
-            admissionInput.value = studentInfo.admissionNumber;
-        }
-        if (guardianPhoneInput && studentInfo.guardianPhone) {
-            guardianPhoneInput.value = studentInfo.guardianPhone;
-        }
         updateIframeSrc(studentInfo);
 
         // Display student badge
-        const infoEl = document.getElementById('homepage-student-info');
-        const infoContainer = document.getElementById('homepage-student-info-container');
-        if (infoEl && infoContainer && studentInfo.classCode) {
-            const displayClass = studentInfo.className || studentInfo.classCode;
-            infoEl.textContent = `Class: ${displayClass}`;
-            infoContainer.style.display = 'flex';
-        } else if (infoContainer) {
-            infoContainer.style.display = 'none';
-        }
-
-        if (studentInfo.studentName && studentInfo.admissionNumber && studentInfo.guardianPhone) {
-            const greetingEl = document.getElementById('homepage-student-greeting');
-            if (greetingEl) {
-                greetingEl.textContent = `Hi, ${studentInfo.studentName}`;
-                greetingEl.style.display = 'inline-block';
-            }
-            if (infoContainer) {
-                infoContainer.style.display = 'flex';
-            }
-        }
-        if (studentInfo.admissionNumber && studentInfo.guardianPhone) {
-            performStudentLookup(studentInfo.admissionNumber, studentInfo.guardianPhone);
-        }
+        renderLoggedStudents(studentInfo);
 
         // Display class poster placeholder/image initially
         const posterImg = document.getElementById('class-poster-img');
@@ -630,29 +879,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Display student badge if configured
-        const infoEl = document.getElementById('homepage-student-info');
-        const infoContainer = document.getElementById('homepage-student-info-container');
-        if (infoEl && infoContainer && result.studentInfo && result.studentInfo.classCode) {
-            const displayClass = result.studentInfo.className || result.studentInfo.classCode;
-            infoEl.textContent = `Class: ${displayClass}`;
-            infoContainer.style.display = 'flex';
-        } else if (infoContainer) {
-            infoContainer.style.display = 'none';
-        }
-
-        if (result.studentInfo && result.studentInfo.studentName && result.studentInfo.admissionNumber && result.studentInfo.guardianPhone) {
-            const greetingEl = document.getElementById('homepage-student-greeting');
-            if (greetingEl) {
-                greetingEl.textContent = `Hi, ${result.studentInfo.studentName}`;
-                greetingEl.style.display = 'inline-block';
-            }
-            if (infoContainer) {
-                infoContainer.style.display = 'flex';
-            }
-        }
-        if (result.studentInfo && result.studentInfo.admissionNumber && result.studentInfo.guardianPhone) {
-            performStudentLookup(result.studentInfo.admissionNumber, result.studentInfo.guardianPhone);
-        }
+        renderLoggedStudents(result.studentInfo);
 
         // Display class poster/image if available
         const posterImg = document.getElementById('class-poster-img');
@@ -676,13 +903,54 @@ document.addEventListener('DOMContentLoaded', () => {
         if (classCodeInput && result.studentInfo && result.studentInfo.classCode) {
             classCodeInput.value = result.studentInfo.classCode;
         }
-        if (admissionInput && result.studentInfo && result.studentInfo.admissionNumber) {
-            admissionInput.value = result.studentInfo.admissionNumber;
-        }
-        if (guardianPhoneInput && result.studentInfo && result.studentInfo.guardianPhone) {
-            guardianPhoneInput.value = result.studentInfo.guardianPhone;
-        }
         updateIframeSrc(result.studentInfo);
     });
+
+    // ============================================================
+    // Inactivity Auto-Logout Tracker
+    // ============================================================
+    (function initInactivityTracker() {
+        let lastHeartbeatTime = 0;
+        let localTimer = null;
+        const LOCAL_TIMEOUT = 300000; // 5 minutes
+
+        function resetLocalInactivity() {
+            if (localTimer) clearTimeout(localTimer);
+            localTimer = setTimeout(() => {
+                console.log("[Inactivity] Local inactivity timeout, logging out...");
+                logoutAllStudents();
+            }, LOCAL_TIMEOUT);
+        }
+
+        function sendActivityHeartbeat() {
+            const now = Date.now();
+            if (now - lastHeartbeatTime > 2000) {
+                lastHeartbeatTime = now;
+                if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+                    chrome.runtime.sendMessage({ type: 'userActivity' }).catch(() => {});
+                } else {
+                    resetLocalInactivity();
+                }
+            }
+        }
+
+        const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+        events.forEach(event => {
+            window.addEventListener(event, sendActivityHeartbeat, { passive: true });
+        });
+
+        if (chrome && chrome.runtime && chrome.runtime.onMessage) {
+            chrome.runtime.onMessage.addListener((message) => {
+                if (message && message.type === 'autoLoggedOut') {
+                    window.location.reload();
+                }
+            });
+        }
+
+        // Start local timer if in fallback mode
+        if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+            resetLocalInactivity();
+        }
+    })();
 
 });

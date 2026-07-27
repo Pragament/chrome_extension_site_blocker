@@ -395,13 +395,24 @@
                     style="padding: 8px 16px; border-radius: 8px; border: 2px solid var(--secondary); font-size: 1rem; color: var(--primary); font-weight: bold; background-color: #eff6ff; outline: none; box-shadow: 0 2px 4px rgba(0,0,0,0.05); width: 200px;">
                 <input type="text" id="homepage-guardian-phone-input" placeholder="Guardian Phone"
                     style="padding: 8px 16px; border-radius: 8px; border: 2px solid var(--secondary); font-size: 1rem; color: var(--primary); font-weight: bold; background-color: #eff6ff; outline: none; box-shadow: 0 2px 4px rgba(0,0,0,0.05); width: 200px;">
+                <button id="homepage-login-btn"
+                    style="padding: 8px 20px; border-radius: 8px; border: none; font-size: 1rem; color: white; font-weight: bold; background-color: var(--secondary); cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.2s;">
+                    Add Student
+                </button>
             </div>
+        </div>
+
+        <!-- Phone Hint Container -->
+        <div id="homepage-phone-hint-container" style="display: none; justify-content: center; align-items: center; margin: 5px 40px 10px;">
+            <span id="homepage-phone-hint" class="student-badge-info" style="background: #f8fafc; border-color: #cbd5e1; color: var(--text-gray); border: 2px solid #cbd5e1; padding: 6px 16px; border-radius: 30px; font-weight: 700; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">Registered Phone: *****43210</span>
         </div>
 
         <!-- Student Info Badge (similar to Student Dashboard) -->
         <div id="homepage-student-info-container"
             style="display: none; justify-content: center; align-items: center; gap: 15px; margin: 10px 40px 5px; flex-wrap: wrap;">
             <span id="homepage-student-greeting" class="student-badge-info" style="display: none; background: #f0fdf4; border-color: #22c55e; color: #15803d;">Hi, Student Name</span>
+            <div id="homepage-student-badges" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: center;"></div>
+            <button id="homepage-logout-all-btn" class="student-badge-info" style="background: #fef2f2; border-color: #ef4444; color: #b91c1c; cursor: pointer; padding: 10px 24px; border-radius: 30px; display: none; border: 2px solid #ef4444; font-weight: 700; outline: none; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); transition: background-color 0.2s;">Logout All</button>
             <span id="homepage-student-error" class="student-badge-info" style="display: none; background: #fef2f2; border-color: #ef4444; color: #b91c1c;">Student not found</span>
             <span id="homepage-student-info" class="student-badge-info">Class: -</span>
         </div>

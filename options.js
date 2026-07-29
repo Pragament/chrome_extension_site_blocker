@@ -182,7 +182,8 @@ $("saveAdminClassRoll").addEventListener("click", async () => {
     return showClassRollMessage(refreshResponse?.message || "Class code was not found in Firestore.", "error");
   }
   
-  await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll, studentName: name } });
+  const className = refreshResponse.className || "";
+  await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll, className: className, studentName: name } });
   console.log("[FCM] Student information saved successfully.");
   await loadWhitelistTextarea();
   showClassRollMessage("Student credentials updated successfully.", "success");

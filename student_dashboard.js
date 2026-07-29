@@ -697,12 +697,30 @@ async function loadStudentInfo() {
   try {
     const data = await chrome.storage.local.get("studentInfo");
     console.log("[Init] Loaded studentInfo data:", JSON.stringify(data));
-    const studentInfo = data.studentInfo;
+    let studentInfo = data.studentInfo;
     
     if (studentInfo && studentInfo.classCode && studentInfo.rollNumber) {
       const infoEl = $("dashStudentInfo");
       if (infoEl) {
-        infoEl.textContent = `Class: ${studentInfo.classCode} | Roll: ${studentInfo.rollNumber}`;
+        const displayClass = studentInfo.className || studentInfo.classCode;
+        infoEl.textContent = `Class: ${displayClass} | Roll: ${studentInfo.rollNumber}`;
+      }
+
+      // Asynchronously load the updated class name from background (Firestore)
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "refreshWishlist",
+          classCode: studentInfo.classCode
+        });
+        if (response && response.success && response.className) {
+          studentInfo.className = response.className;
+          await chrome.storage.local.set({ studentInfo });
+          if (infoEl) {
+            infoEl.textContent = `Class: ${response.className} | Roll: ${studentInfo.rollNumber}`;
+          }
+        }
+      } catch (err) {
+        console.warn("[Init] Failed to refresh class details in background:", err);
       }
       
       // Set initial screen based on tab query parameter
@@ -740,9 +758,9 @@ async function loadStudentInfo() {
         pushScreen("homeScreen");
       }
     } else {
-      console.warn("[Init] Student credentials missing. Redirecting to options.html.");
+      console.warn("[Init] Student credentials missing. Redirecting to homepage.html.");
       alert("Please configure your Class Code and Roll Number first.");
-      window.location.href = chrome.runtime.getURL("options.html");
+      window.location.href = chrome.runtime.getURL("homepage.html");
     }
   } catch (err) {
     console.error("[Init] Error in loadStudentInfo:", err);
@@ -760,3 +778,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachEventListeners();
   await initializeDashboard();
 });
+
+// ============================================================
+// Inactivity Auto-Logout Tracker
+// ============================================================
+(function initInactivityTracker() {
+  let lastHeartbeatTime = 0;
+  function sendActivityHeartbeat() {
+    const now = Date.now();
+    if (now - lastHeartbeatTime > 2000) {
+      lastHeartbeatTime = now;
+      chrome.runtime.sendMessage({ type: 'userActivity' }).catch(() => {});
+    }
+  }
+
+  const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+  events.forEach(event => {
+    window.addEventListener(event, sendActivityHeartbeat, { passive: true });
+  });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === 'autoLoggedOut') {
+      window.location.reload();
+    }
+  });
+})();

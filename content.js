@@ -258,7 +258,7 @@ function initFab() {
 
       // Update panel info
       const display = studentInfo.classCode 
-        ? `Class: ${studentInfo.classCode} | Roll: ${studentInfo.rollNumber || '—'} | PC: ${pcCode || '—'}`
+        ? `Class: ${studentInfo.className || studentInfo.classCode} | Roll: ${studentInfo.rollNumber || '—'} | PC: ${pcCode || '—'}`
         : `Class: — | Roll: — | PC: ${pcCode || '—'}`;
 
       document.getElementById('currentInfo').textContent = display;
@@ -312,7 +312,7 @@ function initFab() {
       }
 
       console.debug('[site-blocker] saving studentInfo to chrome.storage.local');
-      await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
+      await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll, className: refreshResponse.className || '' } });
       console.log("[FCM] Student information saved successfully.");
 
       try {
@@ -370,11 +370,13 @@ function initFab() {
   });
 
   // Auto-update button if changed from options page
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
-      updateDisplay();
-    }
-  });
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
+        updateDisplay();
+      }
+    });
+  }
 }
 
 // ============================================================
@@ -804,6 +806,18 @@ function initW3SchoolsCodeHelp() {
       chrome.runtime.sendMessage({
         type: 'openStudentDashboard',
         tab: 'classQuestions'
+      });
+    });
+
+    dashMyQuestionsBtn.addEventListener('click', async () => {
+      console.debug('[site-blocker] My Questions dashboard button clicked');
+      if (!isExtensionContextAvailable()) {
+        alert('Extension was reloaded. Refresh this page and try again.');
+        return;
+      }
+      chrome.runtime.sendMessage({
+        type: 'openStudentDashboard',
+        tab: 'myQuestions'
       });
     });
 
@@ -1293,3 +1307,27 @@ function copyToClipboard(text) {
   }
   document.body.removeChild(textarea);
 }
+// ============================================================
+// Inactivity Auto-Logout Tracker
+// ============================================================
+(function initInactivityTracker() {
+  let lastHeartbeatTime = 0;
+  function sendActivityHeartbeat() {
+    const now = Date.now();
+    if (now - lastHeartbeatTime > 2000) {
+      lastHeartbeatTime = now;
+      chrome.runtime.sendMessage({ type: 'userActivity' }).catch(() => {});
+    }
+  }
+
+  const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+  events.forEach(event => {
+    window.addEventListener(event, sendActivityHeartbeat, { passive: true });
+  });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === 'autoLoggedOut') {
+      window.location.reload();
+    }
+  });
+})();

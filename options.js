@@ -57,16 +57,18 @@ async function loadPcCodeInput() {
 // Initialize on page load
 document.addEventListener("DOMContentLoaded", async () => {
   await initializePassword();
+  console.log('[FCM] Initial setup deferred. Registration must happen only on Update click.');
+
   // Decide which screen to show
   const { setupComplete } = await chrome.storage.local.get("setupComplete");
   if (setupComplete) {
     setHidden($("setupScreen"), true);
-    setHidden($("roleScreen"), false);
-    setHidden($("loginScreen"), true);
+    setHidden($("loginScreen"), false);
+    setHidden($("mainScreen"), true);
   } else {
     setHidden($("setupScreen"), false);
-    setHidden($("roleScreen"), true);
     setHidden($("loginScreen"), true);
+    setHidden($("mainScreen"), true);
   }
 });
 
@@ -105,6 +107,7 @@ async function showMainScreen() {
 
   await loadWhitelistTextarea();
   await loadPcCodeInput();
+  await loadAdminClassRollInput();
   
   // Always show the password section (no longer hiding it)
   showPasswordChangeSection();
@@ -135,7 +138,7 @@ $("loginPassword").addEventListener("keypress", (e) => {
 
 // Logout functionality
 $("logoutBtn").addEventListener("click", async () => {
-  showRoleScreen();
+  showLoginScreen();
   clearLoginForm();
 });
 
@@ -156,37 +159,6 @@ $("completeSetup").addEventListener("click", async () => {
   showMainScreen();
 });
 
-// Role selection
-$("roleStudent").addEventListener("click", () => {
-  setHidden($("roleScreen"), true);
-  setHidden($("studentScreen"), false);
-});
-
-$("roleAdmin").addEventListener("click", () => {
-  setHidden($("roleScreen"), true);
-  showLoginScreen();
-});
-
-// Student screen actions
-$("backToRoles").addEventListener("click", () => {
-  setHidden($("studentScreen"), true);
-  setHidden($("roleScreen"), false);
-});
-
-$("submitClassCode").addEventListener("click", async () => {
-  const code = $("classCode").value.trim();
-  const roll = $("rollNumber").value.trim();
-  if (!code) return showStudentMessage("Enter class code.", "error");
-  if (!roll) return showStudentMessage("Enter roll number.", "error");
-  const refreshResponse = await chrome.runtime.sendMessage({ type: "refreshWishlist", classCode: code });
-  if (!refreshResponse?.success) {
-    return showStudentMessage(refreshResponse?.message || "Class code was not found in Firestore.", "error");
-  }
-  await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll } });
-  await loadWhitelistTextarea();
-  showStudentMessage("Submitted.", "success");
-});
-
 $("savePcCode").addEventListener("click", async () => {
   const pcCode = $("adminPcCode").value.trim();
   if (pcCode.length < 2) {
@@ -196,6 +168,34 @@ $("savePcCode").addEventListener("click", async () => {
   await chrome.storage.local.set({ pcCode });
   showPcCodeMessage("PC code updated successfully.", "success");
   await refreshDeviceStatus();
+});
+
+$("saveAdminClassRoll").addEventListener("click", async () => {
+  const code = $("adminClassCode").value.trim();
+  const roll = $("adminRollNumber").value.trim();
+  const name = $("adminStudentName").value.trim();
+  if (!code) return showClassRollMessage("Enter class code.", "error");
+  if (!roll) return showClassRollMessage("Enter roll number.", "error");
+  
+  const refreshResponse = await chrome.runtime.sendMessage({ type: "refreshWishlist", classCode: code });
+  if (!refreshResponse?.success) {
+    return showClassRollMessage(refreshResponse?.message || "Class code was not found in Firestore.", "error");
+  }
+  
+  await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll, studentName: name } });
+  console.log("[FCM] Student information saved successfully.");
+  await loadWhitelistTextarea();
+  showClassRollMessage("Student credentials updated successfully.", "success");
+  
+  if (typeof setupFCM === "function") {
+    await setupFCM();
+  } else {
+    console.error("[FCM] setupFCM function is not available.");
+  }
+});
+
+$("openStudentDashBtn").addEventListener("click", () => {
+  window.location.href = chrome.runtime.getURL("student_dashboard.html?referrer=options");
 });
 
 // Toggle password form visibility
@@ -335,11 +335,23 @@ function showLoginError(message) {
   }, 3000);
 }
 
-function showRoleScreen() {
-  setHidden($("roleScreen"), false);
-  setHidden($("loginScreen"), true);
-  setHidden($("mainScreen"), true);
-  setHidden($("studentScreen"), true);
+async function loadAdminClassRollInput() {
+  const { studentInfo } = await chrome.storage.local.get("studentInfo");
+  if (studentInfo) {
+    if ($("adminClassCode")) $("adminClassCode").value = studentInfo.classCode || "";
+    if ($("adminRollNumber")) $("adminRollNumber").value = studentInfo.rollNumber || "";
+    if ($("adminStudentName")) $("adminStudentName").value = studentInfo.studentName || "";
+  }
+}
+
+function showClassRollMessage(message, type) {
+  const el = $("adminClassRollMessage");
+  if (el) {
+    setText(el, message);
+    el.className = type === "error" ? "error-message" : "success-message";
+    setHidden(el, false);
+    setTimeout(() => setHidden(el, true), 3000);
+  }
 }
 
 function showSetupMessage(message, type) {
@@ -443,9 +455,12 @@ function showPasswordForm() {
 }
 
 // Hide the password form
+// Hide the password form
 function hidePasswordForm() {
   const passwordForm = $("passwordForm");
   if (passwordForm) {
     setHidden(passwordForm, true);
   }
 }
+
+

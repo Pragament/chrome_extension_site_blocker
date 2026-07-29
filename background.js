@@ -1,7 +1,41 @@
-// background.js
-// Load shared config into the service worker
-try { importScripts('config.js'); } catch (e) { }
-// Using Firebase REST only for Firestore writes (no SDK loaded)
+console.log('[FCM Service Worker] Service Worker started.');
+
+// Initial check if any push events have been received (Stage 8 warning)
+chrome.storage.local.get("lastPushReceived").then(({ lastPushReceived = null }) => {
+  if (!lastPushReceived) {
+    console.warn('No push event received. This indicates the Service Worker is not receiving FCM messages.');
+  }
+}).catch(() => {});
+
+// Load shared config and Firebase compat SDK scripts into the service worker
+try {
+  importScripts('config.js');
+  importScripts('vendor/firebase/firebase-app-compat.js');
+  importScripts('vendor/firebase/firebase-messaging-compat.js');
+} catch (e) {
+  console.error('[FCM Service Worker] Failed to import scripts:', e);
+}
+
+// Initialize Firebase Messaging inside Service Worker
+if (self.CONFIG && self.CONFIG.FIREBASE) {
+  try {
+    if (firebase.apps.length === 0) {
+      firebase.initializeApp(self.CONFIG.FIREBASE);
+    }
+    const messaging = firebase.messaging();
+    console.log('[FCM Service Worker] Firebase Messaging SDK successfully initialized inside background worker.');
+    console.log('[FCM Service Worker] Firebase Messaging initialized.');
+    
+    // Background message handler
+    messaging.onBackgroundMessage((payload) => {
+      console.log('[FCM Service Worker] onBackgroundMessage fired.');
+      console.log('[FCM Service Worker] Notification payload received.');
+      console.log('[FCM Service Worker] Background message event received payload:', JSON.stringify(payload, null, 2));
+    });
+  } catch (e) {
+    console.error('[FCM Service Worker] Failed to initialize Firebase:', e);
+  }
+}
 const MAX_LOGS = 10000;
 // Load CONFIG if available (from config.js)
 const HEARTBEAT_MINUTES = (self.CONFIG && self.CONFIG.HEARTBEAT_MINUTES) || 1;
@@ -385,46 +419,156 @@ async function fetchTeacherCodeHelpResponse(payload) {
 }
 
 async function dbAskClassQuestion(payload) {
-  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
-    return { success: false, message: 'Firebase is not configured.' };
+  if (!self.CONFIG || !self.CONFIG.BACKEND_BASE) {
+    return { success: false, message: 'Backend URL is not configured.' };
   }
-  const accessToken = await getFirebaseAccessToken();
-  if (!accessToken) {
-    return { success: false, message: 'Unable to authenticate with Firebase.' };
-  }
-  const projectId = self.CONFIG.FIREBASE.projectId;
-  const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/questions`;
+  console.log('[Extension Background] dbAskClassQuestion called with payload:', payload);
+  const endpoint = `${self.CONFIG.BACKEND_BASE}/api/questions`;
   
-  const fields = buildFirestoreFields({
+  try {
+    console.log('[Extension Background] Sending question to local Express backend:', payload);
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        classCode: payload.classCode,
+        rollNumber: payload.rollNumber,
+        studentName: payload.studentName || '',
+        questionTitle: payload.questionTitle || '',
+        questionDescription: payload.questionDescription || '',
+        studentCode: payload.studentCode || '',
+        editorUrl: payload.editorUrl || ''
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.warn('[dbAskClassQuestion] Express API call failed', res.status, errorText);
+      return { success: false, message: 'Failed to save question to Express API.' };
+    }
+
+    const json = await res.json();
+    console.log('[Extension Background] Express API response:', json);
+    return { success: true, questionId: json.questionId };
+  } catch (error) {
+    console.error('[dbAskClassQuestion] Error calling Express API:', error);
+    return { success: false, message: 'Error calling notification server.' };
+  }
+}
+
+async function dbRegisterFcmToken(payload) {
+  console.log('[Background Service Worker] Background worker received token. Payload:', payload);
+  
+  if (!payload.fcmToken) {
+    console.error('[Background Service Worker] POST /api/tokens will NOT be called because fcmToken is missing in the payload.');
+    return { success: false, message: 'Missing FCM token.' };
+  }
+  if (!payload.classCode || !payload.rollNumber) {
+    console.error('[Background Service Worker] POST /api/tokens will NOT be called because classCode or rollNumber is missing in the payload.');
+    return { success: false, message: 'Missing classCode or rollNumber.' };
+  }
+
+  const backendBase = getConfiguredBackendBase();
+  if (!backendBase) {
+    console.error('[Background Service Worker] POST /api/tokens will NOT be called because backend base URL is not configured (CONFIG.BACKEND_BASE is empty/placeholder).');
+    return { success: false, message: 'No backend server configured.' };
+  }
+
+  const endpoint = `${backendBase}/api/tokens`;
+  console.log('[Background Service Worker] POST /api/tokens request. Body:', {
     classCode: payload.classCode,
     rollNumber: payload.rollNumber,
-    questionTitle: payload.questionTitle,
-    questionDescription: payload.questionDescription,
-    studentCode: payload.studentCode,
-    createdTime: new Date(),
-    status: 'Open',
-    repliesCount: 0
+    studentName: payload.studentName || '',
+    fcmToken: payload.fcmToken
   });
 
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        classCode: payload.classCode,
+        rollNumber: payload.rollNumber,
+        studentName: payload.studentName || '',
+        fcmToken: payload.fcmToken
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.warn('[Background Service Worker] Express backend token upload failed:', res.status, errorText);
+      return { success: false, message: 'Failed to upload FCM token to backend.' };
+    }
+
+    const json = await res.json();
+    console.log('[Background Service Worker] Firestore update success.');
+    return { success: true };
+  } catch (error) {
+    console.error('[Background Service Worker] Error uploading token to Express backend:', error);
+    return { success: false, message: 'Error calling Express backend.' };
+  }
+}
+
+async function dbCheckFcmTokenRegistration(payload) {
+  console.log('[Background Service Worker] Checking token registration on backend. Payload:', payload);
+  const backendBase = getConfiguredBackendBase();
+  if (!backendBase) {
+    console.warn('[Background Service Worker] No backend base URL configured. Skipping token check.');
+    return { success: false, message: 'No backend server configured.' };
+  }
+
+  const { classCode, rollNumber, fcmToken } = payload;
+  const endpoint = `${backendBase}/api/tokens/check?classCode=${encodeURIComponent(classCode)}&rollNumber=${encodeURIComponent(rollNumber)}&fcmToken=${encodeURIComponent(fcmToken)}`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!res.ok) {
+      console.warn('[Background Service Worker] Express backend check failed:', res.status);
+      return { success: false, message: 'Failed to verify token with backend.' };
+    }
+
+    const json = await res.json();
+    return { success: true, exists: json.exists, matches: json.matches };
+  } catch (error) {
+    console.error('[Background Service Worker] Error checking token on backend:', error);
+    return { success: false, message: 'Error checking token on backend.' };
+  }
+}
+
+async function dbFetchSingleQuestion(questionId) {
+  if (!self.CONFIG || !self.CONFIG.FIREBASE) return null;
+  const accessToken = await getFirebaseAccessToken();
+  if (!accessToken) return null;
+  const projectId = self.CONFIG.FIREBASE.projectId;
+  const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/questions/${questionId}`;
+
   const res = await fetch(endpoint, {
-    method: 'POST',
+    method: 'GET',
     headers: {
-      'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`
-    },
-    body: JSON.stringify({ fields })
+    }
   });
 
   if (!res.ok) {
-    const errorText = await res.text();
-    console.warn('[dbAskClassQuestion] Firestore write failed', res.status, errorText);
-    return { success: false, message: 'Failed to save question to Firestore.' };
+    console.warn('[dbFetchSingleQuestion] Failed to fetch single question', res.status);
+    return null;
   }
 
-  const json = await res.json();
-  const nameParts = json.name.split('/');
-  const questionId = nameParts[nameParts.length - 1];
-  return { success: true, questionId };
+  const doc = await res.json();
+  const fields = firestoreFieldsToJs(doc.fields);
+  const nameParts = doc.name.split('/');
+  const id = nameParts[nameParts.length - 1];
+  return { id, ...fields };
 }
 
 async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
@@ -438,28 +582,12 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
     structuredQuery: {
       from: [{ collectionId: "questions" }],
       where: {
-        compositeFilter: {
-          op: "AND",
-          filters: [
-            {
-              fieldFilter: {
-                field: { fieldPath: "classCode" },
-                op: "EQUAL",
-                value: { stringValue: classCode }
-              }
-            },
-            {
-              fieldFilter: {
-                field: { fieldPath: "status" },
-                op: "EQUAL",
-                value: { stringValue: "Open" }
-              }
-            }
-          ]
+        fieldFilter: {
+          field: { fieldPath: "classCode" },
+          op: "EQUAL",
+          value: { stringValue: classCode }
         }
-      },
-      limit: limit,
-      offset: offset
+      }
     }
   };
 
@@ -478,7 +606,7 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
   }
 
   const data = await res.json();
-  const questions = [];
+  let questions = [];
   if (Array.isArray(data)) {
     data.forEach(item => {
       if (item.document) {
@@ -491,77 +619,53 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
     });
   }
 
+  // Filter in-memory for Open status
+  questions = questions.filter(q => q.status === 'Open');
+
   questions.sort((a, b) => {
     const tA = new Date(a.createdTime || 0).getTime();
     const tB = new Date(b.createdTime || 0).getTime();
     return tB - tA;
   });
 
-  return questions;
+  return questions.slice(offset, offset + limit);
 }
 
 async function dbSubmitAnswer(payload) {
-  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
-    return { success: false, message: 'Firebase is not configured.' };
+  if (!self.CONFIG || !self.CONFIG.BACKEND_BASE) {
+    return { success: false, message: 'Backend URL is not configured.' };
   }
-  const accessToken = await getFirebaseAccessToken();
-  if (!accessToken) {
-    return { success: false, message: 'Unable to authenticate with Firebase.' };
-  }
-  const projectId = self.CONFIG.FIREBASE.projectId;
-  const { questionId, correctedCode, explanation, authorId, authorName } = payload;
-  
-  const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/questions/${questionId}/responses`;
-  const fields = buildFirestoreFields({
-    authorType: 'student',
-    authorId,
-    authorName,
-    correctedCode,
-    explanation,
-    timestamp: new Date()
-  });
+  const endpoint = `${self.CONFIG.BACKEND_BASE}/api/answers`;
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`
-    },
-    body: JSON.stringify({ fields })
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.warn('[dbSubmitAnswer] Firestore write response failed', res.status, errorText);
-    return { success: false, message: 'Failed to submit response to Firestore.' };
-  }
-
-  const questionEndpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/questions/${questionId}`;
-  const getRes = await fetch(questionEndpoint, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`
-    }
-  });
-
-  if (getRes.ok) {
-    const qData = await getRes.json();
-    const qFields = firestoreFieldsToJs(qData.fields);
-    const currentReplies = Number(qFields.repliesCount || 0);
-    const newReplies = currentReplies + 1;
-
-    const updateFields = buildFirestoreFields({ repliesCount: newReplies });
-    await fetch(`${questionEndpoint}?updateMask.fieldPaths=repliesCount`, {
-      method: 'PATCH',
+  try {
+    console.log('[Extension Background] Submitting answer to local Express backend:', payload);
+    const res = await fetch(endpoint, {
+      method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ fields: updateFields })
+      body: JSON.stringify({
+        questionId: payload.questionId,
+        solverRollNumber: payload.authorId,
+        solverName: payload.authorName || '',
+        correctedCode: payload.correctedCode || '',
+        explanation: payload.explanation || ''
+      })
     });
-  }
 
-  return { success: true };
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.warn('[dbSubmitAnswer] Express API call failed', res.status, errorText);
+      return { success: false, message: 'Failed to submit response to Express API.' };
+    }
+
+    const json = await res.json();
+    console.log('[Extension Background] Express API response:', json);
+    return { success: true };
+  } catch (error) {
+    console.error('[dbSubmitAnswer] Error calling Express API:', error);
+    return { success: false, message: 'Error calling notification server.' };
+  }
 }
 
 async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0) {
@@ -575,28 +679,12 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
     structuredQuery: {
       from: [{ collectionId: "questions" }],
       where: {
-        compositeFilter: {
-          op: "AND",
-          filters: [
-            {
-              fieldFilter: {
-                field: { fieldPath: "classCode" },
-                op: "EQUAL",
-                value: { stringValue: classCode }
-              }
-            },
-            {
-              fieldFilter: {
-                field: { fieldPath: "rollNumber" },
-                op: "EQUAL",
-                value: { stringValue: rollNumber }
-              }
-            }
-          ]
+        fieldFilter: {
+          field: { fieldPath: "classCode" },
+          op: "EQUAL",
+          value: { stringValue: classCode }
         }
-      },
-      limit: limit,
-      offset: offset
+      }
     }
   };
 
@@ -615,7 +703,7 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
   }
 
   const data = await res.json();
-  const questions = [];
+  let questions = [];
   if (Array.isArray(data)) {
     data.forEach(item => {
       if (item.document) {
@@ -628,13 +716,16 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
     });
   }
 
+  // Filter in-memory for my questions
+  questions = questions.filter(q => String(q.rollNumber) === String(rollNumber));
+
   questions.sort((a, b) => {
     const tA = new Date(a.createdTime || 0).getTime();
     const tB = new Date(b.createdTime || 0).getTime();
     return tB - tA;
   });
 
-  return questions;
+  return questions.slice(offset, offset + limit);
 }
 
 async function dbFetchQuestionResponses(questionId, limit = 10, offset = 0) {
@@ -915,11 +1006,19 @@ chrome.runtime.onInstalled.addListener(async () => {
 // On browser startup
 chrome.runtime.onStartup.addListener(() => {
   console.log('[LabPolicy] service worker startup');
+  console.log('[FCM Service Worker] Service Worker started via runtime.onStartup.');
 });
 
 // Heartbeat on alarm
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== "heartbeat") return;
+  
+  // Periodic check if any push events have been received (Stage 8 warning)
+  const { lastPushReceived = null } = await chrome.storage.local.get("lastPushReceived");
+  if (!lastPushReceived) {
+    console.warn('No push event received. This indicates the Service Worker is not receiving FCM messages.');
+  }
+
   const id = await getOrCreateDeviceId();
   const ts = Date.now();
   const ok = await postJSON(`/heartbeat`, { id, ts });
@@ -1097,6 +1196,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
       const classCode = String(studentInfo.classCode || '').trim();
       const rollNumber = String(studentInfo.rollNumber || '').trim();
+      const studentName = String(studentInfo.studentName || '').trim();
       if (!classCode || !rollNumber) {
         sendResponse({ success: false, message: 'Set class code and roll number first.' });
         return;
@@ -1104,11 +1204,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const result = await dbAskClassQuestion({
         classCode,
         rollNumber,
+        studentName,
         questionTitle: message.title,
         questionDescription: message.description,
-        studentCode: message.code
+        studentCode: message.code,
+        editorUrl: message.editorUrl
       });
       sendResponse(result);
+    } else if (message && message.type === "registerFcmToken") {
+      const result = await dbRegisterFcmToken({
+        classCode: message.classCode,
+        rollNumber: message.rollNumber,
+        studentName: message.studentName || '',
+        fcmToken: message.fcmToken
+      });
+      sendResponse(result);
+    } else if (message && message.type === "checkFcmToken") {
+      const result = await dbCheckFcmTokenRegistration({
+        classCode: message.classCode,
+        rollNumber: message.rollNumber,
+        fcmToken: message.fcmToken
+      });
+      sendResponse(result);
+    } else if (message && message.type === "fetchSingleQuestion") {
+      const question = await dbFetchSingleQuestion(message.questionId);
+      sendResponse({ success: true, question });
     } else if (message && message.type === "fetchOpenQuestions") {
       const classCode = String(message.classCode || '').trim();
       const limit = Number(message.limit || 10);
@@ -1119,6 +1239,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
       const classCode = String(studentInfo.classCode || '').trim();
       const rollNumber = String(studentInfo.rollNumber || '').trim();
+      const studentName = String(studentInfo.studentName || '').trim();
+      const authorName = studentName ? studentName : ("Roll " + rollNumber);
       if (!classCode || !rollNumber) {
         sendResponse({ success: false, message: 'Set class code and roll number first.' });
         return;
@@ -1128,7 +1250,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         correctedCode: message.correctedCode,
         explanation: message.explanation,
         authorId: rollNumber,
-        authorName: "Roll " + rollNumber
+        authorName: authorName
       });
       sendResponse(result);
     } else if (message && message.type === "fetchMyQuestions") {
@@ -1158,6 +1280,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tabName = message.tab || "classQuestions";
       const url = chrome.runtime.getURL(`student_dashboard.html?tab=${tabName}`);
       chrome.tabs.create({ url });
+      sendResponse({ success: true });
+    } else if (message && message.type === "trigger_fcm_setup") {
+      console.log('[Background Service Worker] Received trigger_fcm_setup message.');
+      setupBackgroundFCM().catch(err => {
+        console.error('[Background Service Worker] Error in setupBackgroundFCM:', err);
+      });
       sendResponse({ success: true });
     } else {
       sendResponse(undefined);
@@ -1339,3 +1467,310 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     logVisit(tab.url, tab.title || 'Untitled', tabId, allowed);
   } catch (e) { }
 });
+
+// FCM Service Worker Listeners
+
+// Unified push payload handler
+async function handleIncomingPushData(data) {
+  console.log('[FCM Service Worker] Processing incoming push data:', JSON.stringify(data, null, 2));
+  if (!data) return;
+
+  const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
+  
+  // Exclude notifying yourself if you are the original action triggerer
+  if (data.rollNumber && String(data.rollNumber) === String(studentInfo.rollNumber)) {
+    console.log('[FCM Service Worker] Suppressing notification for the action initiator.');
+    return;
+  }
+  
+  // If it's a new question, check for local muting preferences
+  if (data.type === 'new_question') {
+    const { muteEndTime } = await chrome.storage.local.get('muteEndTime');
+    if (muteEndTime && Date.now() < Number(muteEndTime)) {
+      console.log('[FCM Service Worker] Suppressing class questions alert: active mute period is enabled.');
+      // Still broadcast to active sidebars so their lists refresh silently
+      broadcastToActiveTabs({ type: 'push_received', data });
+      return;
+    }
+  }
+  
+  // Build notification title and body
+  let notificationTitle = '📢 New Class Question';
+  let notificationBody = '';
+  
+  if (data.type === 'new_question') {
+    const qTitle = data.title ? String(data.title).trim() : '';
+    if (qTitle) {
+      notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a question.\nTitle:\n${qTitle}\n\nClick to help.`;
+    } else {
+      notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a new question.`;
+    }
+  } else if (data.type === 'answer_notification') {
+    notificationTitle = '✅ Your Question Has Been Answered';
+    notificationBody = `Roll No. ${data.solverRollNumber || 'unknown'} has answered your question.`;
+  } else {
+    // Fallback message composition
+    notificationTitle = data.title || '📢 New Class Question';
+    const fallbackTitle = data.title ? String(data.title).trim() : '';
+    if (fallbackTitle) {
+      notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a question.\nTitle:\n${fallbackTitle}\n\nClick to help.`;
+    } else {
+      notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a new question.`;
+    }
+  }
+  
+  const notificationOptions = {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+    title: notificationTitle,
+    message: notificationBody,
+    priority: 2, // Max priority
+    requireInteraction: false // Allow auto-dismiss
+  };
+  console.log('[FCM Service Worker] Notification options:', notificationOptions);
+  
+  const notificationId = String(data.questionId || 'fcm_alert_' + Date.now());
+  
+  // Await the creation of the notification to prevent service worker premature termination
+  await new Promise((resolve) => {
+    console.log('[FCM Service Worker] Creating desktop notification...');
+    chrome.notifications.create(notificationId, notificationOptions, (id) => {
+      console.log('[FCM Service Worker] Notification ID:', id);
+      if (chrome.runtime.lastError) {
+        console.log('[FCM Service Worker] Success: false');
+        console.log('[FCM Service Worker] Failure: true');
+        console.error('[FCM Service Worker] Runtime error:', chrome.runtime.lastError.message);
+      } else {
+        console.log('[FCM Service Worker] Success: true');
+        console.log('[FCM Service Worker] Failure: false');
+        console.log('[FCM Service Worker] Runtime error: none');
+        console.log('[FCM Service Worker] Notification creation success.');
+      }
+      // Auto dismiss after 7 seconds
+      setTimeout(() => {
+        chrome.notifications.clear(id);
+      }, 7000);
+      resolve();
+    });
+  });
+  
+  // Broadcast to any active client sidebars
+  broadcastToActiveTabs({ type: 'push_received', data });
+}
+
+// Helper to handle redirecting clicks on notifications to deep-linked solver dashboard
+async function handleNotificationClick(questionId) {
+  console.log('[FCM Service Worker] Handling click for question:', questionId);
+  let targetUrl = chrome.runtime.getURL('student_dashboard.html');
+  if (questionId && !questionId.startsWith('fcm_alert')) {
+    targetUrl += `?focusQuestion=${encodeURIComponent(questionId)}`;
+  }
+  
+  await new Promise((resolve) => {
+    chrome.tabs.query({}, (tabs) => {
+      const existingTab = tabs.find(tab => tab.url && tab.url.includes('student_dashboard.html'));
+      if (existingTab) {
+        chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, (updatedTab) => {
+          if (updatedTab) {
+            chrome.windows.update(updatedTab.windowId, { drawAttention: true, focused: true });
+          }
+          resolve();
+        });
+      } else {
+        chrome.tabs.create({ url: targetUrl }, () => {
+          resolve();
+        });
+      }
+    });
+  });
+}
+
+// Bind chrome.notifications click listener (for extension desktop notifications)
+chrome.notifications.onClicked.addListener((notificationId) => {
+  console.log('[FCM Service Worker] Notification clicked.');
+  console.log('[FCM Service Worker] Question ID:', notificationId);
+  let targetUrl = chrome.runtime.getURL('student_dashboard.html');
+  if (notificationId && !notificationId.startsWith('fcm_alert')) {
+    targetUrl += `?focusQuestion=${encodeURIComponent(notificationId)}`;
+  }
+  console.log('[FCM Service Worker] Deep Link:', targetUrl);
+  chrome.notifications.clear(notificationId);
+  handleNotificationClick(notificationId);
+});
+
+// Bind standard Push listener
+self.addEventListener('push', (event) => {
+  console.log('[FCM Service Worker] Push event received.');
+  
+  // Track that we received a push event
+  chrome.storage.local.set({ lastPushReceived: Date.now() }).catch(() => {});
+  
+  let payload;
+  try {
+    payload = event.data ? event.data.json() : null;
+    console.log('[FCM Service Worker] Payload parsed:', JSON.stringify(payload, null, 2));
+  } catch (e) {
+    console.error('[FCM Service Worker] Failed to parse push event JSON data:', e);
+    return;
+  }
+  
+  if (payload) {
+    const data = payload.data || payload.notification || payload;
+    console.log('[FCM Service Worker] event.waitUntil() started.');
+    const promise = handleIncomingPushData(data)
+      .then(() => {
+        console.log('[FCM Service Worker] event.waitUntil() completed.');
+      })
+      .catch((err) => {
+        console.error('[FCM Service Worker] Error in handleIncomingPushData:', err);
+      });
+    event.waitUntil(promise);
+  }
+});
+
+// Fallback SW notification click listener
+self.addEventListener('notificationclick', (event) => {
+  console.log('[FCM Service Worker] Notification clicked (Service Worker Event).');
+  event.notification.close();
+  
+  const tag = event.notification.tag || (event.notification.data && event.notification.data.questionId) || event.notificationId;
+  console.log('[FCM Service Worker] Question ID:', tag);
+  let targetUrl = chrome.runtime.getURL('student_dashboard.html');
+  if (tag && !tag.startsWith('fcm_alert')) {
+    targetUrl += `?focusQuestion=${encodeURIComponent(tag)}`;
+  }
+  console.log('[FCM Service Worker] Deep Link:', targetUrl);
+  event.waitUntil(handleNotificationClick(tag));
+});
+
+function broadcastToActiveTabs(message) {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.url && tab.url.includes('w3schools.com')) {
+        chrome.tabs.sendMessage(tab.id, message).catch(() => {
+          // Suppress errors for tabs not listening
+        });
+      }
+    }
+  });
+  // Also send internally to extension pages (dashboard, options)
+  chrome.runtime.sendMessage(message).catch(() => {
+    // Suppress errors when no pages are active
+  });
+}
+
+// Automatic FCM registration is handled solely in the frontend options and dashboard pages.
+
+function triggerFcmSetupOnActiveTabs() {
+  console.log('[Background Service Worker] Querying open extension tabs to refresh FCM registration...');
+  chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError) return;
+    for (const tab of tabs) {
+      if (tab.url && (tab.url.includes('student_dashboard.html') || tab.url.includes('options.html'))) {
+        console.log('[Background Service Worker] Service worker restart detected. Requesting FCM setup refresh on tab:', tab.id);
+        chrome.tabs.sendMessage(tab.id, { type: 'trigger_fcm_setup' }).catch(() => {});
+      }
+    }
+  });
+}
+triggerFcmSetupOnActiveTabs();
+
+async function setupBackgroundFCM() {
+  console.log('[FCM] setupFCM() called.');
+
+  // 1. Check if student credentials exist first.
+  let studentInfo;
+  try {
+    const data = await chrome.storage.local.get('studentInfo');
+    studentInfo = data.studentInfo;
+  } catch (err) {
+    console.error('[FCM] Error reading studentInfo from storage:', err);
+    console.log('[FCM] registerFcmToken not sent because reading studentInfo from storage failed.');
+    return;
+  }
+
+  if (!studentInfo || !studentInfo.classCode || !studentInfo.rollNumber) {
+    console.log('[FCM] Student credentials not found in storage. Skipping FCM registration.');
+    console.log('[FCM] registerFcmToken not sent because student credentials are not fully configured.');
+    return;
+  }
+
+  console.log('[FCM] Student information found.');
+  
+  // Check permission
+  console.log('[FCM] Notification permission status:', Notification.permission);
+  if (Notification.permission !== 'granted') {
+    console.warn('[FCM] Notification permission is not granted. Current state:', Notification.permission);
+    console.log('[FCM] registerFcmToken not sent because notification permission is not granted.');
+    return;
+  }
+  
+  try {
+    if (typeof firebase !== 'undefined') {
+      if (firebase.apps.length === 0) {
+        firebase.initializeApp(self.CONFIG.FIREBASE);
+      }
+      console.log('[FCM] Firebase initialized.');
+      console.log('[FCM] Requesting Service Worker registration.');
+      const registration = self.registration;
+      if (!registration) {
+        console.error('[FCM] Service Worker registration not found.');
+        console.log('[FCM] registerFcmToken not sent because Service Worker registration was not acquired.');
+        return;
+      }
+      console.log('[FCM] Service Worker registration acquired.');
+      
+      let vapidKey = (self.CONFIG && self.CONFIG.FIREBASE && self.CONFIG.FIREBASE.vapidKey) || undefined;
+      if (vapidKey && vapidKey.length !== 87) {
+        console.warn(`[FCM] Configured VAPID key "${vapidKey}" is malformed (length ${vapidKey.length}, expected 87). Falling back to default FCM VAPID key.`);
+        vapidKey = 'BJkzAUL3Wb2QZXhIGqGpv4CZ638aYT7iiyT6mMHAbIfh9EV9QUXPo8MEmK5V66D7RhTBuJYKqN0G88siWe_6IfM';
+      }
+      
+      const messaging = firebase.messaging();
+      
+      console.log('[FCM] Requesting FCM token...');
+      let token = null;
+      try {
+        token = await messaging.getToken({
+          serviceWorkerRegistration: registration,
+          vapidKey: vapidKey
+        });
+      } catch (err) {
+        console.error(`[FCM] getToken() failed because ${err.message || err}`);
+        console.log('[FCM] registerFcmToken not sent because getToken() threw an error.');
+        return;
+      }
+      
+      if (!token) {
+        console.error('[FCM] Failed to retrieve or generate FCM token.');
+        console.log('[FCM] registerFcmToken not sent because token is null/empty.');
+        return;
+      }
+      
+      console.log(`[FCM] FCM token generated: ${token}`);
+      await chrome.storage.local.set({ fcmToken: token });
+      
+      console.log('[FCM] Sending token to background worker...');
+      console.log('[FCM] Background acknowledged token.');
+      console.log('[FCM] Sending POST /api/tokens... (initiated by background)');
+      
+      const res = await dbRegisterFcmToken({
+        classCode: studentInfo.classCode,
+        rollNumber: studentInfo.rollNumber,
+        studentName: studentInfo.studentName || '',
+        fcmToken: token
+      });
+      
+      if (res && res.success) {
+        console.log('[FCM] Registration completed successfully.');
+      } else {
+        console.error('[FCM] Token upload failed via dbRegisterFcmToken:', res?.message || 'Unknown error');
+      }
+    } else {
+      console.warn('[FCM] Firebase SDK is not loaded in background context.');
+      console.log('[FCM] registerFcmToken not sent because Firebase SDK is not defined.');
+    }
+  } catch (error) {
+    console.error('[FCM] Error during setupFCM execution:', error);
+  }
+}

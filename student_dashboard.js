@@ -263,6 +263,7 @@ function openSolvingWorkspace(question) {
   const corrEditor = $("correctedCodeEditor");
   const explEditor = $("answerExplanation");
   const statusEl = $("solvingStatus");
+  const openEditorBtn = $("openOriginalEditorBtn");
   
   if (titleEl) titleEl.textContent = question.questionTitle || "Untitled";
   if (descEl) descEl.textContent = question.questionDescription || "";
@@ -270,6 +271,18 @@ function openSolvingWorkspace(question) {
   if (corrEditor) corrEditor.value = question.studentCode || "";
   if (explEditor) explEditor.value = "";
   
+  if (openEditorBtn) {
+    if (question.editorUrl && question.editorUrl.trim()) {
+      openEditorBtn.disabled = false;
+      openEditorBtn.textContent = "🌐 Open Original Editor";
+      openEditorBtn.style.backgroundColor = "#3498db";
+    } else {
+      openEditorBtn.disabled = true;
+      openEditorBtn.textContent = "Original editor link unavailable";
+      openEditorBtn.style.backgroundColor = "#bdc3c7";
+    }
+  }
+
   setHidden(statusEl, true);
   
   pushScreen("solvingWorkspaceScreen");
@@ -460,12 +473,80 @@ function openAnswerViewerWorkspace(question, resp) {
   pushScreen("answerViewerScreen");
 }
 
+function cleanCodeString(str) {
+  if (!str) return "";
+  return str
+    .replace(/[\u200b-\u200d\ufeff]/g, '') // remove zero-width characters
+    .replace(/\u00a0/g, ' ')               // replace non-breaking spaces with normal spaces
+    .replace(/^[ \t]*\u2022[ \t]*$/gm, '')  // clean lines containing only a bullet point
+    .replace(/\r\n/g, '\n')                // normalize windows newlines
+    .replace(/\r/g, '\n');                 // normalize mac newlines
+}
+
+async function copyTextToClipboard(text) {
+  const cleanedText = cleanCodeString(text);
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(cleanedText);
+      return true;
+    } catch (e) {
+      console.warn("[Clipboard] API writeText failed, trying fallback...", e);
+    }
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = cleanedText;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const success = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return success;
+  } catch (err) {
+    console.error("[Clipboard] Fallback copy failed:", err);
+    return false;
+  }
+}
+
 // ==========================================
 // Initialization and Listeners Attachment
 // ==========================================
 
 function initStudentDashboardListeners() {
   console.log("[Init] initStudentDashboardListeners called.");
+
+  safeAddListener("openOriginalEditorBtn", "click", () => {
+    if (currentSolvingQuestion && currentSolvingQuestion.editorUrl) {
+      console.log(`[Event Log] Opening original editor URL in a new tab: ${currentSolvingQuestion.editorUrl}`);
+      window.open(currentSolvingQuestion.editorUrl, "_blank");
+    }
+  });
+
+  safeAddListener("copyCodeIcon", "click", async () => {
+    if (!currentSolvingQuestion || !currentSolvingQuestion.studentCode) {
+      console.warn("[Clipboard] No code available to copy.");
+      return;
+    }
+    
+    console.log("[Event Log] Copying original code to clipboard...");
+    const success = await copyTextToClipboard(currentSolvingQuestion.studentCode);
+    
+    if (success) {
+      const copyIcon = $("copyCodeIcon");
+      const successMsg = $("copySuccessMsg");
+      
+      if (copyIcon) copyIcon.textContent = "✔";
+      if (successMsg) setHidden(successMsg, false);
+      
+      setTimeout(() => {
+        if (copyIcon) copyIcon.textContent = "📋";
+        if (successMsg) setHidden(successMsg, true);
+      }, 1000);
+    } else {
+      console.error("[Clipboard] Copy operation failed.");
+    }
+  });
   
   safeAddListener("goToClassQuestionsBtn", "click", () => {
     pushScreen("classQuestionsScreen");
@@ -519,8 +600,8 @@ function initStudentDashboardListeners() {
     const correctedCode = editor ? editor.value : "";
     const explanation = explanationText ? explanationText.value.trim() : "";
     
-    if (!correctedCode.trim() || !explanation) {
-      alert("Please provide both corrected code and an explanation.");
+    if (!correctedCode.trim()) {
+      alert("Please provide corrected code.");
       return;
     }
     
@@ -626,10 +707,30 @@ async function loadStudentInfo() {
       
       // Set initial screen based on tab query parameter
       const urlParams = new URLSearchParams(window.location.search);
+      const focusQuestionId = urlParams.get("focusQuestion");
       const targetTab = urlParams.get("tab");
-      console.log(`[Init] targetTab query param is: "${targetTab || 'none'}"`);
+      console.log(`[Init] targetTab query param is: "${targetTab || 'none'}" | focusQuestion is: "${focusQuestionId || 'none'}"`);
       
-      if (targetTab === "classQuestions") {
+      if (focusQuestionId) {
+        pushScreen("homeScreen"); // Start on home screen back stack anchor
+        chrome.runtime.sendMessage({
+          type: "fetchSingleQuestion",
+          questionId: focusQuestionId
+        }, (response) => {
+          if (response && response.success && response.question) {
+            const q = response.question;
+            if (studentInfo.rollNumber && String(q.rollNumber) === String(studentInfo.rollNumber)) {
+              // Open my question replies list view
+              viewQuestionAnswers(q);
+            } else {
+              // Open class question workspace solver view
+              openSolvingWorkspace(q);
+            }
+          } else {
+            console.error("[Init] Failed to fetch focused question details:", focusQuestionId);
+          }
+        });
+      } else if (targetTab === "classQuestions") {
         pushScreen("classQuestionsScreen");
         loadClassQuestions(false);
       } else if (targetTab === "myQuestions") {
@@ -651,6 +752,7 @@ async function loadStudentInfo() {
 async function initializeDashboard() {
   console.log("[Init] initializeDashboard called.");
   await loadStudentInfo();
+  console.log('[FCM] Dashboard initial setup deferred. Registration must happen only on Update click.');
 }
 
 document.addEventListener("DOMContentLoaded", async () => {

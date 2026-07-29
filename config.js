@@ -2,7 +2,7 @@
 // Leave optional endpoints blank until production infrastructure is ready.
 
 const CONFIG = {
-  BACKEND_BASE: "",
+  BACKEND_BASE: "http://localhost:3000",
   ADMIN_DASHBOARD_URL: "",
   HEARTBEAT_MINUTES: 1,
   REQUIRED_RULES: [
@@ -13,6 +13,8 @@ const CONFIG = {
     apiKey: "AIzaSyDR3Q-q1lornS8SjCMBNfcdCr6avx4tBm8",
     authDomain: "eschool-dev-4c6b4.firebaseapp.com",
     projectId: "eschool-dev-4c6b4",
+    messagingSenderId: "875648503944",
+    vapidKey: "BJkzAUL3Wb2QZXhIGqGpv4CZ638aYT7iiyT6mMHAbIfh9EV9QUXPo8MEmK5V66D7RhTBuJYKqN0G88siWe_6IfM",
     appId: "1:875648503944:web:3055e97d1026c38d6f0f3d",
     // REST endpoints derived from projectId
     rest: {

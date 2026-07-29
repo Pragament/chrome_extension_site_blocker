@@ -27,24 +27,40 @@ async function loadWhitelistTextarea() {
     "studentInfo"
   ]);
 
-  // Always start with the admin-saved whitelist
-  const set = new Set(whitelist);
+  // Set textarea to ONLY the custom admin whitelist (no storage pollution!)
+  $("whitelist").value = whitelist.join("\n");
 
-  // Merge class wishlist on top (don't replace)
-  const hasFetchedWishlist = classWishlistCache &&
-    classWishlistCache.classCode === studentInfo.classCode &&
-    Array.isArray(classWishlistCache.wishlist) &&
-    classWishlistCache.wishlist.length > 0;
+  // Format and show dynamic rules in the active rules container
+  const activeContainer = $("activeRulesContainer");
+  if (activeContainer) {
+    let html = "";
+    
+    // 1. Required rules
+    if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES) && self.CONFIG.REQUIRED_RULES.length > 0) {
+      html += `<div><strong>🔒 Required System Rules (Always Allowed):</strong></div>`;
+      html += `<div style="margin-left: 10px; margin-bottom: 8px; color: #475569;">${self.CONFIG.REQUIRED_RULES.map(r => `<code>${r}</code>`).join(", ")}</div>`;
+    }
+    
+    // 2. Class wishlist
+    const hasFetchedWishlist = classWishlistCache &&
+      classWishlistCache.classCode === studentInfo.classCode &&
+      Array.isArray(classWishlistCache.wishlist) &&
+      classWishlistCache.wishlist.length > 0;
+      
+    if (hasFetchedWishlist) {
+      html += `<div><strong>🏫 Active Class Rules (Allowed dynamically for class <code>${studentInfo.classCode}</code>):</strong></div>`;
+      html += `<div style="margin-left: 10px; color: #475569;">${classWishlistCache.wishlist.map(r => `<code>${r}</code>`).join(", ")}</div>`;
+    } else if (studentInfo.classCode) {
+      html += `<div><strong>🏫 Active Class Rules:</strong> No class rules currently cached for <code>${studentInfo.classCode}</code>.</div>`;
+    }
 
-  if (hasFetchedWishlist) {
-    classWishlistCache.wishlist.forEach(r => set.add(r));
+    if (html) {
+      activeContainer.innerHTML = html;
+      activeContainer.style.display = "block";
+    } else {
+      activeContainer.style.display = "none";
+    }
   }
-
-  if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
-    self.CONFIG.REQUIRED_RULES.forEach(r => set.add(r));
-  }
-
-  $("whitelist").value = Array.from(set).join("\n");
 }
 
 async function loadPcCodeInput() {
@@ -288,12 +304,6 @@ $("changePasswordBtn").addEventListener("click", async () => {
 // Save whitelist
 $("save").addEventListener("click", async () => {
   let lines = normalizeLines($("whitelist").value);
-  // Ensure required rules are present
-  if (self.CONFIG && Array.isArray(self.CONFIG.REQUIRED_RULES)) {
-    const set = new Set(lines);
-    self.CONFIG.REQUIRED_RULES.forEach(r => set.add(r));
-    lines = Array.from(set);
-  }
 
   await chrome.storage.local.set({ whitelist: lines });
   await loadWhitelistTextarea();

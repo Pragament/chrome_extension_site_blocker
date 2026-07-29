@@ -427,130 +427,204 @@ async function fetchTeacherCodeHelpResponse(payload) {
 }
 
 async function dbAskClassQuestion(payload) {
-  if (!self.CONFIG || !self.CONFIG.BACKEND_BASE) {
-    return { success: false, message: 'Backend URL is not configured.' };
-  }
-  console.log('[Extension Background] dbAskClassQuestion called with payload:', payload);
-  const endpoint = `${self.CONFIG.BACKEND_BASE}/api/questions`;
-  
-  try {
-    console.log('[Extension Background] Sending question to local Express backend:', payload);
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        classCode: payload.classCode,
-        rollNumber: payload.rollNumber,
-        studentName: payload.studentName || '',
-        questionTitle: payload.questionTitle || '',
-        questionDescription: payload.questionDescription || '',
-        studentCode: payload.studentCode || '',
-        editorUrl: payload.editorUrl || ''
-      })
-    });
+  console.log('[Extension Background] dbAskClassQuestion called. Payload:', payload);
+  const backendBase = getConfiguredBackendBase();
+  if (backendBase) {
+    const endpoint = `${backendBase}/api/questions`;
+    console.log('[Extension Background] Trying Express backend for question creation:', endpoint);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          classCode: payload.classCode,
+          rollNumber: payload.rollNumber,
+          studentName: payload.studentName || '',
+          questionTitle: payload.questionTitle || '',
+          questionDescription: payload.questionDescription || '',
+          studentCode: payload.studentCode || '',
+          editorUrl: payload.editorUrl || ''
+        })
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        const json = await res.json();
+        console.log('[Extension Background] Express backend question registration success:', json);
+        return { success: true, questionId: json.questionId };
+      }
+      
       const errorText = await res.text();
       console.warn('[dbAskClassQuestion] Express API call failed', res.status, errorText);
-      return { success: false, message: 'Failed to save question to Express API.' };
+      console.log('[dbAskClassQuestion] Falling back to direct Firestore question submission...');
+    } catch (error) {
+      console.error('[dbAskClassQuestion] Error calling Express API:', error);
+      console.log('[dbAskClassQuestion] Falling back to direct Firestore question submission...');
     }
-
-    const json = await res.json();
-    console.log('[Extension Background] Express API response:', json);
-    return { success: true, questionId: json.questionId };
-  } catch (error) {
-    console.error('[dbAskClassQuestion] Error calling Express API:', error);
-    return { success: false, message: 'Error calling notification server.' };
+  } else {
+    console.log('[dbAskClassQuestion] Express backend not configured. Using direct Firestore question submission...');
   }
+
+  return dbAskClassQuestionFirestore(payload);
+}
+
+async function dbRegisterFcmTokenFirestore(payload) {
+  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
+    return { success: false, message: 'Firebase is not configured.' };
+  }
+  const accessToken = await getFirebaseAccessToken();
+  if (!accessToken) {
+    return { success: false, message: 'Unable to authenticate with Firebase.' };
+  }
+  const projectId = self.CONFIG.FIREBASE.projectId;
+  const docId = `${payload.classCode}_${payload.rollNumber}`;
+  const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/studentFcmTokens/${encodeURIComponent(docId)}`;
+
+  const fields = buildFirestoreFields({
+    classCode: payload.classCode,
+    rollNumber: payload.rollNumber,
+    studentName: payload.studentName || '',
+    fcmToken: payload.fcmToken,
+    timestamp: new Date(),
+    updatedTime: new Date()
+  });
+
+  const res = await fetch(endpoint, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    },
+    body: JSON.stringify({ fields })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.warn('[dbRegisterFcmTokenFirestore] Firestore token write failed:', res.status, errorText);
+    return { success: false, message: 'Failed to write token to Firestore.' };
+  }
+
+  console.log('[dbRegisterFcmTokenFirestore] Firestore token write success.');
+  return { success: true };
+}
+
+async function dbCheckFcmTokenRegistrationFirestore(payload) {
+  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
+    return { success: false, exists: false, matches: false };
+  }
+  const accessToken = await getFirebaseAccessToken();
+  if (!accessToken) {
+    return { success: false, exists: false, matches: false };
+  }
+  const projectId = self.CONFIG.FIREBASE.projectId;
+  const docId = `${payload.classCode}_${payload.rollNumber}`;
+  const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents/studentFcmTokens/${encodeURIComponent(docId)}`;
+
+  const res = await fetch(endpoint, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
+
+  if (!res.ok) {
+    if (res.status === 404) {
+      console.log('[dbCheckFcmTokenRegistrationFirestore] Token document not found (404).');
+      return { success: true, exists: false, matches: false };
+    }
+    console.warn('[dbCheckFcmTokenRegistrationFirestore] Firestore read failed:', res.status);
+    return { success: false, exists: false, matches: false };
+  }
+
+  const docData = await res.json();
+  const fields = firestoreFieldsToJs(docData.fields);
+  const exists = true;
+  const matches = fields && fields.fcmToken === payload.fcmToken;
+  console.log('[dbCheckFcmTokenRegistrationFirestore] Firestore check result:', { exists, matches });
+  return { success: true, exists, matches };
 }
 
 async function dbRegisterFcmToken(payload) {
-  console.log('[Background Service Worker] Background worker received token. Payload:', payload);
+  console.log('[Background Service Worker] dbRegisterFcmToken called. Payload:', payload);
   
   if (!payload.fcmToken) {
-    console.error('[Background Service Worker] POST /api/tokens will NOT be called because fcmToken is missing in the payload.');
     return { success: false, message: 'Missing FCM token.' };
   }
   if (!payload.classCode || !payload.rollNumber) {
-    console.error('[Background Service Worker] POST /api/tokens will NOT be called because classCode or rollNumber is missing in the payload.');
     return { success: false, message: 'Missing classCode or rollNumber.' };
   }
 
   const backendBase = getConfiguredBackendBase();
-  if (!backendBase) {
-    console.error('[Background Service Worker] POST /api/tokens will NOT be called because backend base URL is not configured (CONFIG.BACKEND_BASE is empty/placeholder).');
-    return { success: false, message: 'No backend server configured.' };
-  }
+  if (backendBase) {
+    const endpoint = `${backendBase}/api/tokens`;
+    console.log('[Background Service Worker] Trying Express backend for token registration:', endpoint);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          classCode: payload.classCode,
+          rollNumber: payload.rollNumber,
+          studentName: payload.studentName || '',
+          fcmToken: payload.fcmToken
+        })
+      });
 
-  const endpoint = `${backendBase}/api/tokens`;
-  console.log('[Background Service Worker] POST /api/tokens request. Body:', {
-    classCode: payload.classCode,
-    rollNumber: payload.rollNumber,
-    studentName: payload.studentName || '',
-    fcmToken: payload.fcmToken
-  });
-
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        classCode: payload.classCode,
-        rollNumber: payload.rollNumber,
-        studentName: payload.studentName || '',
-        fcmToken: payload.fcmToken
-      })
-    });
-
-    if (!res.ok) {
+      if (res.ok) {
+        console.log('[Background Service Worker] Express backend token registration success.');
+        return { success: true };
+      }
+      
       const errorText = await res.text();
       console.warn('[Background Service Worker] Express backend token upload failed:', res.status, errorText);
-      return { success: false, message: 'Failed to upload FCM token to backend.' };
+      console.log('[Background Service Worker] Falling back to direct Firestore token registration...');
+    } catch (error) {
+      console.error('[Background Service Worker] Error uploading token to Express backend:', error);
+      console.log('[Background Service Worker] Falling back to direct Firestore token registration...');
     }
-
-    const json = await res.json();
-    console.log('[Background Service Worker] Firestore update success.');
-    return { success: true };
-  } catch (error) {
-    console.error('[Background Service Worker] Error uploading token to Express backend:', error);
-    return { success: false, message: 'Error calling Express backend.' };
+  } else {
+    console.log('[Background Service Worker] Express backend not configured. Using direct Firestore token registration...');
   }
+
+  return dbRegisterFcmTokenFirestore(payload);
 }
 
 async function dbCheckFcmTokenRegistration(payload) {
-  console.log('[Background Service Worker] Checking token registration on backend. Payload:', payload);
+  console.log('[Background Service Worker] dbCheckFcmTokenRegistration called. Payload:', payload);
+  
   const backendBase = getConfiguredBackendBase();
-  if (!backendBase) {
-    console.warn('[Background Service Worker] No backend base URL configured. Skipping token check.');
-    return { success: false, message: 'No backend server configured.' };
-  }
+  if (backendBase) {
+    const { classCode, rollNumber, fcmToken } = payload;
+    const endpoint = `${backendBase}/api/tokens/check?classCode=${encodeURIComponent(classCode)}&rollNumber=${encodeURIComponent(rollNumber)}&fcmToken=${encodeURIComponent(fcmToken)}`;
+    console.log('[Background Service Worker] Trying Express backend to check token registration:', endpoint);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
 
-  const { classCode, rollNumber, fcmToken } = payload;
-  const endpoint = `${backendBase}/api/tokens/check?classCode=${encodeURIComponent(classCode)}&rollNumber=${encodeURIComponent(rollNumber)}&fcmToken=${encodeURIComponent(fcmToken)}`;
-
-  try {
-    const res = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
+      if (res.ok) {
+        const json = await res.json();
+        console.log('[Background Service Worker] Express backend check success:', json);
+        return { success: true, exists: json.exists, matches: json.matches };
       }
-    });
-
-    if (!res.ok) {
+      
       console.warn('[Background Service Worker] Express backend check failed:', res.status);
-      return { success: false, message: 'Failed to verify token with backend.' };
+      console.log('[Background Service Worker] Falling back to direct Firestore check...');
+    } catch (error) {
+      console.error('[Background Service Worker] Error checking token on backend:', error);
+      console.log('[Background Service Worker] Falling back to direct Firestore check...');
     }
-
-    const json = await res.json();
-    return { success: true, exists: json.exists, matches: json.matches };
-  } catch (error) {
-    console.error('[Background Service Worker] Error checking token on backend:', error);
-    return { success: false, message: 'Error checking token on backend.' };
+  } else {
+    console.log('[Background Service Worker] Express backend not configured. Using direct Firestore check...');
   }
+
+  return dbCheckFcmTokenRegistrationFirestore(payload);
 }
 
 async function dbFetchSingleQuestion(questionId) {
@@ -577,6 +651,9 @@ async function dbFetchSingleQuestion(questionId) {
   const nameParts = doc.name.split('/');
   const id = nameParts[nameParts.length - 1];
   return { id, ...fields };
+}
+
+async function dbAskClassQuestionFirestore(payload) {
   if (!self.CONFIG || !self.CONFIG.FIREBASE) {
     return { success: false, message: 'Firebase is not configured.' };
   }
@@ -1747,6 +1824,7 @@ async function logVisit(url, title, tabId, allowed) {
 // Handle navigation
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // only main-frame
+  if (details.tabId === -1) return; // ignore invalid tab IDs
 
   // Ignore navigation to the extension's own URLs and browser internal pages
   if (
@@ -1762,20 +1840,30 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   }
 
   console.log('[LabPolicy] onBeforeNavigate', details.url);
-  const whitelist = await getCombinedWhitelist();
-  const allowed = isAllowed(details.url, whitelist);
+  try {
+    const whitelist = await getCombinedWhitelist();
+    const allowed = isAllowed(details.url, whitelist);
 
-  if (!allowed) {
-    chrome.tabs.update(details.tabId, {
-      url: chrome.runtime.getURL("blocked.html") + "?orig=" + encodeURIComponent(details.url)
+    if (!allowed) {
+      chrome.tabs.update(details.tabId, {
+        url: chrome.runtime.getURL("blocked.html") + "?orig=" + encodeURIComponent(details.url)
+      });
+    }
+
+    chrome.tabs.get(details.tabId, (tab) => {
+      if (chrome.runtime.lastError) {
+        // Safe fallback in case tab doesn't exist anymore or isn't accessible
+        console.log('[LabPolicy] logging visit with fallback title', { url: details.url, allowed });
+        logVisit(details.url, "Untitled", details.tabId, allowed);
+        return;
+      }
+      const title = tab?.title || "Untitled";
+      console.log('[LabPolicy] logging visit', { url: details.url, allowed });
+      logVisit(details.url, title, details.tabId, allowed);
     });
+  } catch (err) {
+    console.error('[LabPolicy] onBeforeNavigate failed:', err);
   }
-
-  chrome.tabs.get(details.tabId, (tab) => {
-    const title = tab?.title || "Untitled";
-    console.log('[LabPolicy] logging visit', { url: details.url, allowed });
-    logVisit(details.url, title, details.tabId, allowed);
-  });
 });
 
 // Fallback: also listen to tab updates when a page completes loading

@@ -57,6 +57,7 @@ async function loadPcCodeInput() {
 // Initialize on page load
 document.addEventListener("DOMContentLoaded", async () => {
   await initializePassword();
+  console.log('[FCM] Initial setup deferred. Registration must happen only on Update click.');
 
   // Decide which screen to show
   const { setupComplete } = await chrome.storage.local.get("setupComplete");
@@ -172,6 +173,7 @@ $("savePcCode").addEventListener("click", async () => {
 $("saveAdminClassRoll").addEventListener("click", async () => {
   const code = $("adminClassCode").value.trim();
   const roll = $("adminRollNumber").value.trim();
+  const name = $("adminStudentName").value.trim();
   if (!code) return showClassRollMessage("Enter class code.", "error");
   if (!roll) return showClassRollMessage("Enter roll number.", "error");
   
@@ -181,15 +183,16 @@ $("saveAdminClassRoll").addEventListener("click", async () => {
   }
   
   const className = refreshResponse.className || "";
-  await chrome.storage.local.set({
-    studentInfo: {
-      classCode: code,
-      className: className,
-      rollNumber: roll
-    }
-  });
+  await chrome.storage.local.set({ studentInfo: { classCode: code, rollNumber: roll, className: className, studentName: name } });
+  console.log("[FCM] Student information saved successfully.");
   await loadWhitelistTextarea();
   showClassRollMessage("Student credentials updated successfully.", "success");
+  
+  if (typeof setupFCM === "function") {
+    await setupFCM();
+  } else {
+    console.error("[FCM] setupFCM function is not available.");
+  }
 });
 
 $("openStudentDashBtn").addEventListener("click", () => {
@@ -338,6 +341,7 @@ async function loadAdminClassRollInput() {
   if (studentInfo) {
     if ($("adminClassCode")) $("adminClassCode").value = studentInfo.classCode || "";
     if ($("adminRollNumber")) $("adminRollNumber").value = studentInfo.rollNumber || "";
+    if ($("adminStudentName")) $("adminStudentName").value = studentInfo.studentName || "";
   }
 }
 

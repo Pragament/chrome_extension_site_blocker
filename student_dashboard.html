@@ -302,18 +302,27 @@
 
     <div class="split-pane">
       <div class="pane">
-        <label>Original Code (Read-Only)</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+          <label style="margin: 0; font-weight: bold; color: #34495e;">Original Code (Read-Only)</label>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span id="copySuccessMsg" class="hidden" style="color: #27ae60; font-size: 12px; font-weight: bold;">✓ Copied!</span>
+            <span id="copyCodeIcon" title="Copy Original Code" style="cursor: pointer; font-size: 16px;">📋</span>
+          </div>
+        </div>
         <div id="originalCodeViewer" class="code-viewer-panel"></div>
       </div>
       <div class="pane">
-        <label>Your Corrected Code (Editable)</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+          <label style="margin: 0; font-weight: bold; color: #34495e;">Your Corrected Code (Editable)</label>
+          <button id="openOriginalEditorBtn" class="btn" style="padding: 4px 8px; font-size: 12px; height: 26px; line-height: 18px; margin: 0; background-color: #3498db; color: white;">🌐 Open Original Editor</button>
+        </div>
         <textarea id="correctedCodeEditor" class="code-editor-textarea" spellcheck="false"></textarea>
       </div>
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
-      <label style="font-weight: bold; color: #34495e;">Explanation</label>
-      <textarea id="answerExplanation" placeholder="Explain your corrections here..." style="width: 100%; height: 80px; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-family: sans-serif; box-sizing: border-box; resize: vertical;"></textarea>
+      <label style="font-weight: bold; color: #34495e;">Explanation (Optional)</label>
+      <textarea id="answerExplanation" placeholder="Explain your corrections here (Optional)..." style="width: 100%; height: 80px; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-family: sans-serif; box-sizing: border-box; resize: vertical;"></textarea>
     </div>
 
     <div class="button-group" style="justify-content: flex-start; gap: 10px;">
@@ -404,6 +413,8 @@
   <script src="config.js"></script>
   <script src="auth.js"></script>
   <script src="utils.js"></script>
+  <script src="vendor/firebase/firebase-app-compat.js"></script>
+  <script src="vendor/firebase/firebase-messaging-compat.js"></script>
   <script src="student_dashboard.js"></script>
 </body>
 </html>

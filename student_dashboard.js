@@ -164,6 +164,7 @@ function diffLines(oldLines, newLines) {
 async function loadClassQuestions(append = false) {
   console.log(`[Firestore Query] loadClassQuestions called (append=${append})`);
   const { studentInfo } = await chrome.storage.local.get("studentInfo");
+  console.log("[Firestore Query] Retrieved studentInfo from storage for Class Questions:", studentInfo);
   if (!studentInfo || !studentInfo.classCode) {
     console.error("[Firestore Query Error] studentInfo or classCode is missing in storage.");
     return;
@@ -177,12 +178,14 @@ async function loadClassQuestions(append = false) {
   }
   
   try {
+    console.log("[Firestore Query] Sending message type 'fetchOpenQuestions' with classCode:", studentInfo.classCode);
     const response = await chrome.runtime.sendMessage({
       type: "fetchOpenQuestions",
       classCode: studentInfo.classCode,
       limit: classQuestionsLimit,
       offset: classQuestionsOffset
     });
+    console.log("[Firestore Query] Received response for fetchOpenQuestions:", response);
     
     if (!append) {
       const listEl = $("classQuestionsList");
@@ -203,8 +206,9 @@ async function loadClassQuestions(append = false) {
     }
     
     let displayedCount = 0;
+    const loggedRolls = String(studentInfo.rollNumber || '').split('-').map(r => r.trim()).filter(Boolean);
     questions.forEach(q => {
-      if (studentInfo.rollNumber && String(q.rollNumber) === String(studentInfo.rollNumber)) {
+      if (loggedRolls.includes(String(q.rollNumber).trim())) {
         return;
       }
       displayedCount++;
@@ -291,6 +295,7 @@ function openSolvingWorkspace(question) {
 async function loadMyQuestions(append = false) {
   console.log(`[Firestore Query] loadMyQuestions called (append=${append})`);
   const { studentInfo } = await chrome.storage.local.get("studentInfo");
+  console.log("[Firestore Query] Retrieved studentInfo from storage for My Questions:", studentInfo);
   if (!studentInfo || !studentInfo.classCode || !studentInfo.rollNumber) {
     console.error("[Firestore Query Error] studentInfo, classCode, or rollNumber is missing in storage.");
     return;
@@ -304,6 +309,7 @@ async function loadMyQuestions(append = false) {
   }
   
   try {
+    console.log("[Firestore Query] Sending message type 'fetchMyQuestions' with classCode:", studentInfo.classCode, "and rollNumber:", studentInfo.rollNumber);
     const response = await chrome.runtime.sendMessage({
       type: "fetchMyQuestions",
       classCode: studentInfo.classCode,
@@ -311,6 +317,15 @@ async function loadMyQuestions(append = false) {
       limit: myQuestionsLimit,
       offset: myQuestionsOffset
     });
+    console.log("[Firestore Query] Received response for fetchMyQuestions:", response);
+    
+    let viewedAnswers = {};
+    try {
+      const stored = await chrome.storage.local.get('viewedAnswers');
+      viewedAnswers = stored.viewedAnswers || {};
+    } catch (err) {
+      console.warn('[Dashboard] Failed to fetch viewedAnswers:', err);
+    }
     
     if (!append) {
       const listEl = $("myQuestionsList");
@@ -333,10 +348,25 @@ async function loadMyQuestions(append = false) {
       const badgeClass = statusText.toLowerCase() === "solved" ? "badge solved" : "badge open";
       const repliesCount = Number(q.repliesCount || 0);
       
+      const viewedList = viewedAnswers[q.id] || [];
+      const unreadCount = Math.max(0, repliesCount - viewedList.length);
+      
+      let badgeHtml = '';
+      if (repliesCount > 0) {
+        if (unreadCount > 0) {
+          badgeHtml = `<span class="badge unread" style="background-color: #e74c3c; color: white; margin-left: 6px; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 11px; display: inline-block;">🔴 ${unreadCount} New ${unreadCount === 1 ? 'Answer' : 'Answers'}</span>`;
+        } else {
+          badgeHtml = `<span class="badge viewed" style="background-color: #2ecc71; color: white; margin-left: 6px; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 11px; display: inline-block;">✓ All Answers Viewed</span>`;
+        }
+      }
+      
       card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
           <h3>${escapeHtml(q.questionTitle || "Untitled")}</h3>
-          <span class="${badgeClass}">${statusText}</span>
+          <div>
+            <span class="${badgeClass}">${statusText}</span>
+            ${badgeHtml}
+          </div>
         </div>
         <p>${escapeHtml(q.questionDescription || "No description provided.")}</p>
         <div class="card-meta" style="margin-bottom: 10px;">
@@ -348,7 +378,9 @@ async function loadMyQuestions(append = false) {
       
       card.querySelector(".view-answers-btn").addEventListener("click", () => {
         console.log(`[Event Log] Clicked "View Answers" for question ID: "${q.id}"`);
-        viewQuestionAnswers(q);
+        // Find the first unread answer ID if there are any
+        // We will fetch the responses in viewQuestionAnswers, so we pass null as highlight for manual click
+        viewQuestionAnswers(q, null);
       });
       
       const listEl = $("myQuestionsList");
@@ -367,9 +399,65 @@ async function loadMyQuestions(append = false) {
   }
 }
 
-async function viewQuestionAnswers(question) {
-  console.log(`[Firestore Query] Fetching answers for question: "${question.id}"`);
+async function markAnswerAsViewed(questionId, answerId) {
+  try {
+    const { viewedAnswers = {} } = await chrome.storage.local.get('viewedAnswers');
+    if (!viewedAnswers[questionId]) {
+      viewedAnswers[questionId] = [];
+    }
+    if (!viewedAnswers[questionId].includes(answerId)) {
+      viewedAnswers[questionId].push(answerId);
+      await chrome.storage.local.set({ viewedAnswers });
+      console.log('[Dashboard] Persistent mark as viewed:', answerId);
+      
+      // Update badge count immediately on the main list in the background
+      loadMyQuestions(false);
+      
+      // Update the specific list item in the DOM directly
+      const listEl = $("myQuestionAnswersList");
+      if (listEl) {
+        const items = listEl.querySelectorAll('.response-item');
+        items.forEach(item => {
+          if (item.dataset.respId === String(answerId)) {
+            const metaEl = item.querySelector('.response-meta');
+            if (metaEl) {
+              metaEl.style.cssText = '';
+              metaEl.innerHTML = `Roll ${item.dataset.authorId} <span class="badge viewed-reply" style="color: #2ecc71; font-weight: bold; margin-left: 6px;">✓ Viewed</span>`;
+            }
+            item.style.cssText = 'border: 1px solid rgba(0, 0, 0, 0.08); background-color: #ffffff; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; transition: background-color 0.5s, border-color 0.5s;';
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Dashboard] Failed to mark answer as viewed:', err);
+  }
+}
+
+async function viewQuestionAnswers(question, highlightAnswerId = null) {
+  console.log(`[Firestore Query] Fetching answers for question: "${question.id}" (highlight: "${highlightAnswerId || 'none'}")`);
   currentViewerQuestion = question;
+  
+  // Clear unread solutions badge for this question in local storage
+  try {
+    const { unreadSolutions = {} } = await chrome.storage.local.get('unreadSolutions');
+    if (unreadSolutions[question.id]) {
+      if (highlightAnswerId) {
+        unreadSolutions[question.id] = unreadSolutions[question.id].filter(id => String(id) !== String(highlightAnswerId));
+        if (unreadSolutions[question.id].length === 0) {
+          delete unreadSolutions[question.id];
+        }
+      } else {
+        delete unreadSolutions[question.id];
+      }
+      await chrome.storage.local.set({ unreadSolutions });
+      console.log('[Dashboard] Updated unread solutions for question:', question.id, 'remaining:', unreadSolutions[question.id] || 'none');
+      // Update badge count immediately
+      loadMyQuestions(false);
+    }
+  } catch (err) {
+    console.warn('[Dashboard] Failed to clear unreadSolutions badge:', err);
+  }
   
   const titleEl = $("myQuestionAnswersTitle");
   if (titleEl) titleEl.textContent = "Answers to: " + (question.questionTitle || "Untitled");
@@ -393,21 +481,56 @@ async function viewQuestionAnswers(question) {
       return;
     }
     
+    // Fetch viewed answers dictionary from storage
+    const { viewedAnswers = {} } = await chrome.storage.local.get('viewedAnswers');
+    const viewedList = viewedAnswers[question.id] || [];
+    
     responses.forEach(resp => {
       const item = document.createElement("div");
       item.className = "response-item";
+      item.dataset.respId = resp.id;
+      item.dataset.authorId = resp.authorId;
+      
+      const isHighlighted = highlightAnswerId && String(resp.id) === String(highlightAnswerId);
+      const isViewed = viewedList.includes(resp.id);
+      
+      if (isHighlighted) {
+        markAnswerAsViewed(question.id, resp.id);
+        item.style.cssText = 'border: 2px solid #e74c3c; background-color: #fdf2f2; box-shadow: 0 0 10px rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; transition: background-color 1s ease, border-color 1s ease, box-shadow 1s ease;';
+        
+        // Fade back to normal style after 3 seconds
+        setTimeout(() => {
+          item.style.backgroundColor = '#ffffff';
+          item.style.borderColor = 'rgba(0, 0, 0, 0.08)';
+          item.style.boxShadow = 'none';
+        }, 3000);
+      } else if (!isViewed) {
+        item.style.cssText = 'border: 2px solid #3498db; background-color: #eef7fc; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;';
+      } else {
+        item.style.cssText = 'border: 1px solid rgba(0, 0, 0, 0.08); background-color: #ffffff; border-radius: 8px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;';
+      }
       
       item.innerHTML = `
-        <span class="response-meta">Roll ${resp.authorId}</span>
+        <span class="response-meta" style="${isHighlighted ? 'font-weight: bold; color: #c0392b;' : ''}">
+          Roll ${resp.authorId}
+          ${isHighlighted ? ' 🔴 (New Solution)' : (!isViewed ? ' <span class="badge new-reply" style="background-color: #3498db; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-left: 6px; display: inline-block;">🔵 NEW</span>' : ' <span class="badge viewed-reply" style="color: #2ecc71; font-weight: bold; margin-left: 6px;">✓ Viewed</span>')}
+        </span>
         <button class="btn view-resp-btn" style="padding: 6px 12px; font-size: 12px;">View Answer</button>
       `;
       
       item.querySelector(".view-resp-btn").addEventListener("click", () => {
         console.log(`[Event Log] Clicked "View Answer" for response ID: "${resp.id}" by helper Roll ${resp.authorId}`);
+        markAnswerAsViewed(question.id, resp.id);
         openAnswerViewerWorkspace(question, resp);
       });
       
       if (listEl) listEl.appendChild(item);
+      
+      if (isHighlighted) {
+        setTimeout(() => {
+          item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 150);
+      }
     });
   } catch (error) {
     console.error("[Firestore Query Error] Error loading responses:", error);
@@ -516,6 +639,34 @@ async function copyTextToClipboard(text) {
 function initStudentDashboardListeners() {
   console.log("[Init] initStudentDashboardListeners called.");
 
+  safeAddListener("copyCorrectedCodeBtn", "click", async () => {
+    const corrEl = $("viewCorrectedCode");
+    if (!corrEl) {
+      console.warn("[Clipboard] Corrected code element not found.");
+      return;
+    }
+    const code = corrEl.textContent || "";
+    if (!code) {
+      console.warn("[Clipboard] No corrected code text available to copy.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(code);
+      console.log("[Clipboard] Corrected code copied successfully.");
+      const btn = $("copyCorrectedCodeBtn");
+      if (btn) {
+        btn.textContent = "✓ Copied";
+        setTimeout(() => {
+          btn.textContent = "📋 Copy";
+        }, 2000);
+      }
+    } catch (err) {
+      console.error("[Clipboard] Failed to copy corrected code:", err);
+      alert("Failed to copy code.");
+    }
+  });
+
   safeAddListener("openOriginalEditorBtn", "click", () => {
     if (currentSolvingQuestion && currentSolvingQuestion.editorUrl) {
       console.log(`[Event Log] Opening original editor URL in a new tab: ${currentSolvingQuestion.editorUrl}`);
@@ -600,8 +751,8 @@ function initStudentDashboardListeners() {
     const correctedCode = editor ? editor.value : "";
     const explanation = explanationText ? explanationText.value.trim() : "";
     
-    if (!correctedCode.trim()) {
-      alert("Please provide corrected code.");
+    if (!correctedCode.trim() || !explanation.trim()) {
+      alert("Please provide both the corrected code and explanation.");
       return;
     }
     
@@ -726,21 +877,26 @@ async function loadStudentInfo() {
       // Set initial screen based on tab query parameter
       const urlParams = new URLSearchParams(window.location.search);
       const focusQuestionId = urlParams.get("focusQuestion");
+      const focusAnswerId = urlParams.get("focusAnswer");
       const targetTab = urlParams.get("tab");
-      console.log(`[Init] targetTab query param is: "${targetTab || 'none'}" | focusQuestion is: "${focusQuestionId || 'none'}"`);
+      console.log(`[Init] targetTab query param is: "${targetTab || 'none'}" | focusQuestion is: "${focusQuestionId || 'none'}" | focusAnswer is: "${focusAnswerId || 'none'}"`);
       
       if (focusQuestionId) {
-        pushScreen("homeScreen"); // Start on home screen back stack anchor
         chrome.runtime.sendMessage({
           type: "fetchSingleQuestion",
           questionId: focusQuestionId
         }, (response) => {
           if (response && response.success && response.question) {
             const q = response.question;
-            if (studentInfo.rollNumber && String(q.rollNumber) === String(studentInfo.rollNumber)) {
+            const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+            if (rollNumbers.includes(String(q.rollNumber).trim())) {
+              // Anchor to My Questions parent screen so back button works correctly
+              pushScreen("myQuestionsScreen");
               // Open my question replies list view
-              viewQuestionAnswers(q);
+              viewQuestionAnswers(q, focusAnswerId);
             } else {
+              // Anchor to Class Questions parent screen
+              pushScreen("classQuestionsScreen");
               // Open class question workspace solver view
               openSolvingWorkspace(q);
             }
@@ -800,6 +956,33 @@ document.addEventListener("DOMContentLoaded", async () => {
   chrome.runtime.onMessage.addListener((message) => {
     if (message && message.type === 'autoLoggedOut') {
       window.location.reload();
+    } else if (message && message.type === 'navigate_to_question') {
+      console.log('[Dashboard Router] Dynamic navigation requested:', message);
+      const focusQuestionId = message.focusQuestion;
+      const focusAnswerId = message.focusAnswer;
+      if (focusQuestionId) {
+        chrome.storage.local.get("studentInfo", (data) => {
+          const studentInfo = data.studentInfo || {};
+          chrome.runtime.sendMessage({
+            type: "fetchSingleQuestion",
+            questionId: focusQuestionId
+          }, (response) => {
+            if (response && response.success && response.question) {
+              const q = response.question;
+              const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+              if (rollNumbers.includes(String(q.rollNumber).trim())) {
+                pushScreen("myQuestionsScreen");
+                viewQuestionAnswers(q, focusAnswerId);
+              } else {
+                pushScreen("classQuestionsScreen");
+                openSolvingWorkspace(q);
+              }
+            } else {
+              console.error("[Dashboard Router] Failed to fetch focused question details:", focusQuestionId);
+            }
+          });
+        });
+      }
     }
   });
 })();

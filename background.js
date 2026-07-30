@@ -707,11 +707,6 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
     structuredQuery: {
       from: [{ collectionId: "questions" }],
       where: {
-        fieldFilter: {
-          field: { fieldPath: "classCode" },
-          op: "EQUAL",
-          value: { stringValue: classCode }
-        },
         compositeFilter: {
           op: "AND",
           filters: [
@@ -731,9 +726,7 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
             }
           ]
         }
-      },
-      limit: limit,
-      offset: offset
+      }
     }
   };
 
@@ -769,15 +762,15 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
   questions = questions.filter(q => q.status === 'Open');
 
   questions.sort((a, b) => {
-    const tA = new Date(a.createdTime || 0).getTime();
-    const tB = new Date(b.createdTime || 0).getTime();
-    return tB - tA;
+    const timeA = a.createdAt || a.createdTime || 0;
+    const timeB = b.createdAt || b.createdTime || 0;
+    return new Date(timeB) - new Date(timeA);
   });
 
-  return questions;
+  return questions.slice(offset, offset + limit);
 }
 
-async function dbSubmitAnswer(payload) {
+async function dbSubmitAnswerFirestore(payload) {
   if (!self.CONFIG || !self.CONFIG.FIREBASE) {
     return { success: false, message: 'Firebase is not configured.' };
   }
@@ -841,6 +834,47 @@ async function dbSubmitAnswer(payload) {
   return { success: true };
 }
 
+async function dbSubmitAnswer(payload) {
+  console.log('[Extension Background] dbSubmitAnswer called. Payload:', payload);
+  const backendBase = getConfiguredBackendBase();
+  if (backendBase) {
+    const endpoint = `${backendBase}/api/answers`;
+    console.log('[Extension Background] Trying Express backend for answer submission:', endpoint);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          questionId: payload.questionId,
+          solverRollNumber: payload.authorId,
+          solverName: payload.authorName,
+          correctedCode: payload.correctedCode,
+          explanation: payload.explanation
+        })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        console.log('[Extension Background] Express backend answer submission success:', json);
+        return { success: true, answerId: json.answerId };
+      }
+
+      const errorText = await res.text();
+      console.warn('[dbSubmitAnswer] Express API call failed', res.status, errorText);
+      console.log('[dbSubmitAnswer] Falling back to direct Firestore answer submission...');
+    } catch (error) {
+      console.error('[dbSubmitAnswer] Error calling Express API:', error);
+      console.log('[dbSubmitAnswer] Falling back to direct Firestore answer submission...');
+    }
+  } else {
+    console.log('[dbSubmitAnswer] Express backend not configured. Using direct Firestore answer submission...');
+  }
+
+  return dbSubmitAnswerFirestore(payload);
+}
+
 async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0) {
   if (!self.CONFIG || !self.CONFIG.FIREBASE) return [];
   const accessToken = await getFirebaseAccessToken();
@@ -880,11 +914,6 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
     structuredQuery: {
       from: [{ collectionId: "questions" }],
       where: {
-        fieldFilter: {
-          field: { fieldPath: "classCode" },
-          op: "EQUAL",
-          value: { stringValue: classCode }
-        },
         compositeFilter: {
           op: "AND",
           filters: [
@@ -898,9 +927,7 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
             rollFilter
           ]
         }
-      },
-      limit: limit,
-      offset: offset
+      }
     }
   };
 
@@ -932,13 +959,13 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
     });
   }
 
-  // Filter in-memory for my questions
-  questions = questions.filter(q => String(q.rollNumber) === String(rollNumber));
+  // Filter in-memory for my questions supporting multi-student roll number login
+  questions = questions.filter(q => rollNumbers.includes(String(q.rollNumber).trim()));
 
   questions.sort((a, b) => {
-    const tA = new Date(a.createdTime || 0).getTime();
-    const tB = new Date(b.createdTime || 0).getTime();
-    return tB - tA;
+    const timeA = a.createdAt || a.createdTime || 0;
+    const timeB = b.createdAt || b.createdTime || 0;
+    return new Date(timeB) - new Date(timeA);
   });
 
   return questions.slice(offset, offset + limit);
@@ -1685,9 +1712,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       sendResponse(result);
     } else if (message && message.type === "openStudentDashboard") {
-      const tabName = message.tab || "classQuestions";
-      const url = chrome.runtime.getURL(`student_dashboard.html?tab=${tabName}`);
-      chrome.tabs.create({ url });
+      const tabName = message.tab;
+      const focusQuestion = message.focusQuestion;
+      const focusAnswer = message.focusAnswer;
+      
+      let params = [];
+      if (tabName) params.push(`tab=${encodeURIComponent(tabName)}`);
+      if (focusQuestion) params.push(`focusQuestion=${encodeURIComponent(focusQuestion)}`);
+      if (focusAnswer) params.push(`focusAnswer=${encodeURIComponent(focusAnswer)}`);
+      
+      const targetUrl = chrome.runtime.getURL('student_dashboard.html' + (params.length > 0 ? '?' + params.join('&') : ''));
+      
+      chrome.tabs.query({}, (tabs) => {
+        const existingTab = tabs.find(tab => tab.url && tab.url.includes('student_dashboard.html'));
+        if (existingTab) {
+          chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, (updatedTab) => {
+            if (updatedTab) {
+              chrome.windows.update(updatedTab.windowId, { drawAttention: true, focused: true });
+            }
+          });
+        } else {
+          chrome.tabs.create({ url: targetUrl });
+        }
+      });
       sendResponse({ success: true });
     } else if (message && message.type === "trigger_fcm_setup") {
       console.log('[Background Service Worker] Received trigger_fcm_setup message.');
@@ -1899,9 +1946,16 @@ async function handleIncomingPushData(data) {
   const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
   
   // Exclude notifying yourself if you are the original action triggerer
-  if (data.rollNumber && String(data.rollNumber) === String(studentInfo.rollNumber)) {
-    console.log('[FCM Service Worker] Suppressing notification for the action initiator.');
-    return;
+  if (data.type === 'new_question') {
+    if (data.rollNumber && String(data.rollNumber) === String(studentInfo.rollNumber)) {
+      console.log('[FCM Service Worker] Suppressing new question notification for the author.');
+      return;
+    }
+  } else if (data.type === 'answer_notification') {
+    if (data.solverRollNumber && String(data.solverRollNumber) === String(studentInfo.rollNumber)) {
+      console.log('[FCM Service Worker] Suppressing answer notification for the solver.');
+      return;
+    }
   }
   
   // If it's a new question, check for local muting preferences
@@ -1927,8 +1981,8 @@ async function handleIncomingPushData(data) {
       notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a new question.`;
     }
   } else if (data.type === 'answer_notification') {
-    notificationTitle = '✅ Your Question Has Been Answered';
-    notificationBody = `Roll No. ${data.solverRollNumber || 'unknown'} has answered your question.`;
+    notificationTitle = 'New Solution Received';
+    notificationBody = `Roll No. ${data.solverRollNumber || 'unknown'} submitted a solution for your question.`;
   } else {
     // Fallback message composition
     notificationTitle = data.title || '📢 New Class Question';
@@ -1937,6 +1991,50 @@ async function handleIncomingPushData(data) {
       notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a question.\nTitle:\n${fallbackTitle}\n\nClick to help.`;
     } else {
       notificationBody = `Roll No. ${data.rollNumber || 'unknown'} asked a new question.`;
+    }
+  }
+
+  // Save to local notification history
+  try {
+    const { notificationHistory = [] } = await chrome.storage.local.get('notificationHistory');
+    
+    const targetUniqueId = data.type === 'answer_notification' ? String(data.answerId || '') : String(data.questionId || '');
+    const exists = notificationHistory.some(n => {
+      const existingUniqueId = n.type === 'answer_notification' ? String(n.data?.answerId || '') : String(n.data?.questionId || '');
+      return existingUniqueId === targetUniqueId && n.type === data.type;
+    });
+
+    if (!exists) {
+      notificationHistory.unshift({
+        id: data.type === 'answer_notification' ? `${data.questionId}|${data.answerId}` : String(data.questionId || Date.now()),
+        type: data.type,
+        data: data,
+        timestamp: Date.now()
+      });
+      if (notificationHistory.length > 20) {
+        notificationHistory.pop();
+      }
+      await chrome.storage.local.set({ notificationHistory });
+      console.log('[FCM Service Worker] Saved notification to local history:', data.questionId, 'type:', data.type);
+    }
+  } catch (err) {
+    console.warn('[FCM Service Worker] Failed to save to notificationHistory:', err);
+  }
+
+  // If answer notification, save to unreadSolutions storage
+  if (data.type === 'answer_notification') {
+    try {
+      const { unreadSolutions = {} } = await chrome.storage.local.get('unreadSolutions');
+      if (!unreadSolutions[data.questionId]) {
+        unreadSolutions[data.questionId] = [];
+      }
+      if (!unreadSolutions[data.questionId].includes(data.answerId)) {
+        unreadSolutions[data.questionId].push(data.answerId);
+        await chrome.storage.local.set({ unreadSolutions });
+        console.log('[FCM Service Worker] Saved unread answer to local storage:', data.answerId);
+      }
+    } catch (err) {
+      console.warn('[FCM Service Worker] Failed to save to unreadSolutions:', err);
     }
   }
   
@@ -1950,7 +2048,9 @@ async function handleIncomingPushData(data) {
   };
   console.log('[FCM Service Worker] Notification options:', notificationOptions);
   
-  const notificationId = String(data.questionId || 'fcm_alert_' + Date.now());
+  const notificationId = data.type === 'answer_notification' 
+    ? `${data.questionId}|${data.answerId}` 
+    : String(data.questionId || 'fcm_alert_' + Date.now());
   
   // Await the creation of the notification to prevent service worker premature termination
   await new Promise((resolve) => {
@@ -1980,11 +2080,23 @@ async function handleIncomingPushData(data) {
 }
 
 // Helper to handle redirecting clicks on notifications to deep-linked solver dashboard
-async function handleNotificationClick(questionId) {
-  console.log('[FCM Service Worker] Handling click for question:', questionId);
+async function handleNotificationClick(notificationId) {
+  console.log('[FCM Service Worker] Handling click for notification ID:', notificationId);
+  
+  let questionId = notificationId;
+  let answerId = '';
+  if (notificationId && notificationId.includes('|')) {
+    const parts = notificationId.split('|');
+    questionId = parts[0];
+    answerId = parts[1];
+  }
+
   let targetUrl = chrome.runtime.getURL('student_dashboard.html');
   if (questionId && !questionId.startsWith('fcm_alert')) {
     targetUrl += `?focusQuestion=${encodeURIComponent(questionId)}`;
+    if (answerId) {
+      targetUrl += `&focusAnswer=${encodeURIComponent(answerId)}`;
+    }
   }
   
   await new Promise((resolve) => {
@@ -2009,12 +2121,7 @@ async function handleNotificationClick(questionId) {
 // Bind chrome.notifications click listener (for extension desktop notifications)
 chrome.notifications.onClicked.addListener((notificationId) => {
   console.log('[FCM Service Worker] Notification clicked.');
-  console.log('[FCM Service Worker] Question ID:', notificationId);
-  let targetUrl = chrome.runtime.getURL('student_dashboard.html');
-  if (notificationId && !notificationId.startsWith('fcm_alert')) {
-    targetUrl += `?focusQuestion=${encodeURIComponent(notificationId)}`;
-  }
-  console.log('[FCM Service Worker] Deep Link:', targetUrl);
+  console.log('[FCM Service Worker] Composite ID:', notificationId);
   chrome.notifications.clear(notificationId);
   handleNotificationClick(notificationId);
 });
@@ -2065,19 +2172,40 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 function broadcastToActiveTabs(message) {
+  console.log(`[Step 8] Sending runtime message...`);
+  console.log(`Payload:`, JSON.stringify(message, null, 2));
+
   chrome.tabs.query({}, (tabs) => {
-    for (const tab of tabs) {
-      if (tab.url && tab.url.includes('w3schools.com')) {
-        chrome.tabs.sendMessage(tab.id, message).catch(() => {
-          // Suppress errors for tabs not listening
-        });
-      }
+    const httpTabs = tabs.filter(tab => tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://')));
+    if (httpTabs.length === 0) {
+      console.warn(`[Step 8] Send failure: No matching tab found (no HTTP/HTTPS tabs are open).`);
     }
+
+    httpTabs.forEach((tab) => {
+      console.log(`[Step 8] Sending message to Target tab: ID ${tab.id} (${tab.url})`);
+      chrome.tabs.sendMessage(tab.id, message)
+        .then(() => {
+          console.log(`[Step 8] Send success to tab: ID ${tab.id}. Success: true. Failure: false.`);
+        })
+        .catch((error) => {
+          let failureReason = error && error.message ? error.message : 'Unknown runtime error';
+          if (failureReason.includes('Could not establish connection')) {
+            failureReason = 'Receiving end does not exist (Content script not injected or page loading)';
+          }
+          console.warn(`[Step 8] Send failure to tab: ID ${tab.id}. Success: false. Failure: true. Reason: ${failureReason}`);
+        });
+    });
   });
+
   // Also send internally to extension pages (dashboard, options)
-  chrome.runtime.sendMessage(message).catch(() => {
-    // Suppress errors when no pages are active
-  });
+  chrome.runtime.sendMessage(message)
+    .then(() => {
+      console.log(`[Step 8] Send success to extension internal pages. Success: true. Failure: false.`);
+    })
+    .catch((error) => {
+      // It is normal to fail if no extension pages (options/dashboard) are currently open
+      console.debug(`[Step 8] Internal message send response: Extension page unavailable or not listening.`);
+    });
 }
 
 // Automatic FCM registration is handled solely in the frontend options and dashboard pages.

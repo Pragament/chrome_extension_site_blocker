@@ -68,39 +68,44 @@ function initFab() {
       <strong>W3Schools editor</strong>
       <button id="askClassBtn" type="button">Ask Class</button>
       <div id="askClassForm" style="display: none; flex-direction: column; gap: 8px; margin-top: 8px;">
-        <input type="text" id="qTitle" placeholder="Question Title (Optional)" style="padding: 6px; font-size: 13px; width: 100%; box-sizing: border-box;">
-        <textarea id="qDesc" placeholder="Short Description (Optional)" style="padding: 6px; font-size: 13px; height: 60px; resize: none; border-radius: 6px; border: 1px solid #ccc; font-family: sans-serif; width: 100%; box-sizing: border-box;"></textarea>
+        <input type="text" id="qTitle" placeholder="Question Title (Required)" style="padding: 6px; font-size: 13px; width: 100%; box-sizing: border-box;">
+        <textarea id="qDesc" placeholder="Short Description (Required)" style="padding: 6px; font-size: 13px; height: 60px; resize: none; border-radius: 6px; border: 1px solid #ccc; font-family: sans-serif; width: 100%; box-sizing: border-box;"></textarea>
         <div style="display: flex; gap: 8px; width: 100%;">
           <button id="submitQBtn" type="button" style="flex: 1; padding: 6px; font-size: 13px; background-color: #2ecc71;">Submit</button>
           <button id="cancelQBtn" type="button" style="flex: 1; padding: 6px; font-size: 13px; background-color: #95a5a6;">Cancel</button>
         </div>
       </div>
       <div id="codeHelpStatus" class="field-help" style="margin-top: 4px;"></div>
-      
-      <!-- Notifications Section -->
-      <strong style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e5edf3; padding-top: 12px;">
+    </div>
+    
+    <!-- Notifications Section -->
+    <div id="globalNotificationsSection" class="panel-section" style="border-top: 1px solid #e5edf3; padding-top: 12px; margin-top: 12px;">
+      <strong style="display: flex; align-items: center; justify-content: space-between;">
         Notifications
         <button id="muteBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Mute (10m)</button>
       </strong>
       <div id="incomingQuestionsList" style="margin-top: 8px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
         <div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>
       </div>
-      
-      <!-- Answer Details View -->
-      <div id="answerNotificationPanel" style="display: none; margin-top: 12px; padding: 10px; background: #e8f8f5; border: 1px solid #a3e4d7; border-radius: 6px; font-size: 12px; flex-direction: column; gap: 6px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <strong style="color: #117864;">Answer Details</strong>
-          <span id="closeAnswerPanelBtn" style="cursor: pointer; font-weight: bold; font-size: 14px; color: #117864;">×</span>
-        </div>
-        <div id="answerPanelMeta" style="font-size: 11px; color: #16a085;"></div>
-        <div id="answerPanelDesc" style="font-style: italic; color: #2c3e50; max-height: 50px; overflow-y: auto;"></div>
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
-          <button id="copyAnswerCodeBtn" type="button" style="padding: 4px 8px; font-size: 11px; background-color: #1abc9c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Copy Code</button>
-          <button id="loadAnswerCodeBtn" type="button" style="padding: 4px 8px; font-size: 11px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Load Editor</button>
-        </div>
+    </div>
+    
+    <!-- Answer Details View -->
+    <div id="answerNotificationPanel" style="display: none; margin-top: 12px; padding: 10px; background: #e8f8f5; border: 1px solid #a3e4d7; border-radius: 6px; font-size: 12px; flex-direction: column; gap: 6px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong style="color: #117864;">Answer Details</strong>
+        <span id="closeAnswerPanelBtn" style="cursor: pointer; font-weight: bold; font-size: 14px; color: #117864;">×</span>
       </div>
+      <div id="answerPanelMeta" style="font-size: 11px; color: #16a085;"></div>
+      <div id="answerPanelDesc" style="font-style: italic; color: #2c3e50; max-height: 50px; overflow-y: auto;"></div>
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
+        <button id="copyAnswerCodeBtn" type="button" style="padding: 4px 8px; font-size: 11px; background-color: #1abc9c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Copy Code</button>
+        <button id="loadAnswerCodeBtn" type="button" style="padding: 4px 8px; font-size: 11px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Load Editor</button>
+      </div>
+    </div>
 
-      <strong style="margin-top: 12px; display: block; border-top: 1px solid #e5edf3; padding-top: 12px;">Student Dashboard</strong>
+    <!-- Student Dashboard Section -->
+    <div id="globalDashboardSection" class="panel-section" style="border-top: 1px solid #e5edf3; padding-top: 12px; margin-top: 12px;">
+      <strong>Student Dashboard</strong>
       <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px; width: 100%;">
         <button id="dashClassQuestionsBtn" type="button" style="padding: 8px; font-size: 13px; background-color: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%;">Class Questions</button>
         <button id="dashMyQuestionsBtn" type="button" style="padding: 8px; font-size: 13px; background-color: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%;">My Questions</button>
@@ -265,6 +270,113 @@ function initFab() {
       newCodeInput.value = studentInfo.classCode || '';
       newRollInput.value = studentInfo.rollNumber || '';
       renderWhitelistLinks(getDisplayWhitelist(storageState));
+
+      // Populate sidebar notifications list
+      if (studentInfo.classCode) {
+        chrome.runtime.sendMessage({
+          type: 'fetchOpenQuestions',
+          classCode: studentInfo.classCode,
+          limit: 5,
+          offset: 0
+        }, async (response) => {
+          const container = document.getElementById('incomingQuestionsList');
+          if (!container) return;
+          container.innerHTML = '';
+
+          // 1. Read local notificationHistory
+          let localNotifications = [];
+          try {
+            const stored = await chrome.storage.local.get('notificationHistory');
+            localNotifications = stored.notificationHistory || [];
+          } catch (storageErr) {
+            console.warn('[content.js] Failed to fetch notificationHistory:', storageErr);
+          }
+          
+          // 2. Filter local notificationHistory to match classCode
+          const classNotifications = localNotifications.filter(n => 
+            n.data && String(n.data.classCode).trim() === String(studentInfo.classCode).trim()
+          );
+
+          // 3. Map local notifications to display format
+          const formattedNotifications = classNotifications.map(n => ({
+            id: n.data.questionId,
+            questionId: n.data.questionId,
+            answerId: n.data.answerId || '',
+            type: n.type,
+            title: n.data.questionTitle || n.data.title || 'Untitled',
+            rollNumber: n.data.rollNumber,
+            solverRollNumber: n.data.solverRollNumber || '',
+            timestamp: n.timestamp,
+            createdTime: n.timestamp
+          }));
+
+          // 4. Fetch open questions from server
+          const serverQuestions = (response && response.success && Array.isArray(response.questions)) 
+            ? response.questions 
+            : [];
+          
+          // Filter out our own questions from server list
+          const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+          const filteredServerQuestions = serverQuestions.filter(q => 
+            !rollNumbers.includes(String(q.rollNumber).trim())
+          );
+
+          // 5. Merge lists, deduplicating on unique event ID (answerId for answer notifications, questionId for question notifications)
+          const merged = [];
+          const seenIds = new Set();
+
+          // Add local ones first
+          formattedNotifications.forEach(n => {
+            const uid = n.type === 'answer_notification' ? String(n.answerId) : String(n.questionId);
+            if (uid && !seenIds.has(uid)) {
+              seenIds.add(uid);
+              merged.push(n);
+            }
+          });
+
+          // Add server questions next
+          filteredServerQuestions.forEach(q => {
+            const qId = q.id || q.questionId;
+            const uid = String(qId);
+            if (uid && !seenIds.has(uid)) {
+              seenIds.add(uid);
+              merged.push({
+                id: qId,
+                questionId: qId,
+                answerId: '',
+                type: 'new_question',
+                title: q.questionTitle || q.title || 'Untitled',
+                rollNumber: q.rollNumber,
+                solverRollNumber: '',
+                timestamp: q.createdAt || q.createdTime || Date.now(),
+                createdTime: q.createdAt || q.createdTime || Date.now()
+              });
+            }
+          });
+
+          // Sort merged list chronologically, newest first
+          merged.sort((a, b) => {
+            const timeA = new Date(a.timestamp || a.createdTime || 0);
+            const timeB = new Date(b.timestamp || b.createdTime || 0);
+            return timeB - timeA;
+          });
+
+          // 6. Render
+          if (merged.length === 0) {
+            container.innerHTML = '<div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>';
+          } else {
+            // Limit to 5 items total
+            merged.slice(0, 5).forEach(item => {
+              renderSidebarNotificationItem(container, item, false);
+            });
+          }
+        });
+      } else {
+        const container = document.getElementById('incomingQuestionsList');
+        if (container) {
+          container.innerHTML = '<div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>';
+        }
+      }
     } catch (e) {
       console.warn('Storage error:', e);
       fabClass.textContent = '!';
@@ -403,7 +515,6 @@ function buildGrammarPrompt(userPrompt) {
 // W3Schools Try editor code help
 // ============================================================
 function initW3SchoolsCodeHelp() {
-  if (!isW3SchoolsTryEditorPage()) return;
   if (window.__labPolicyW3SchoolsCodeHelpInitialized) return;
   window.__labPolicyW3SchoolsCodeHelpInitialized = true;
   let activeAnswerCode = '';
@@ -734,7 +845,7 @@ function initW3SchoolsCodeHelp() {
 
     if (!section || !askClassBtn || !askClassForm || !qTitle || !qDesc || !submitQBtn || !cancelQBtn || !dashClassQuestionsBtn || !dashMyQuestionsBtn) return false;
 
-    section.hidden = false;
+    section.hidden = !isW3SchoolsTryEditorPage();
 
     askClassBtn.addEventListener('click', () => {
       askClassBtn.style.display = 'none';
@@ -759,6 +870,15 @@ function initW3SchoolsCodeHelp() {
 
       const title = qTitle.value.trim();
       const description = qDesc.value.trim();
+
+      if (!title) {
+        setStatus('Title is required.');
+        return;
+      }
+      if (!description) {
+        setStatus('Description is required.');
+        return;
+      }
 
       const code = readW3SchoolsCode();
       if (!code || !code.trim() || code === 'No code found') {
@@ -821,17 +941,6 @@ function initW3SchoolsCodeHelp() {
       });
     });
 
-    dashMyQuestionsBtn.addEventListener('click', async () => {
-      console.debug('[site-blocker] My Questions dashboard button clicked');
-      if (!isExtensionContextAvailable()) {
-        alert('Extension was reloaded. Refresh this page and try again.');
-        return;
-      }
-      chrome.runtime.sendMessage({
-        type: 'openStudentDashboard',
-        tab: 'myQuestions'
-      });
-    });
 
     // Mute button logic
     const muteBtn = document.getElementById('muteBtn');
@@ -911,6 +1020,7 @@ function initW3SchoolsCodeHelp() {
     }
 
     if (loadAnswerCodeBtn) {
+      loadAnswerCodeBtn.style.display = isW3SchoolsTryEditorPage() ? 'inline-block' : 'none';
       loadAnswerCodeBtn.addEventListener('click', () => {
         if (activeAnswerCode) {
           const success = writeW3SchoolsCode(activeAnswerCode);
@@ -1199,56 +1309,363 @@ function initGeminiPromptLogger() {
   }, true);
 }
 
+const questionPopupQueue = [];
+let isPopupActive = false;
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+async function queueQuestionPopup(data) {
+  console.log(`[Step 9] queueQuestionPopup() called.`);
+  console.log(`Data:`, JSON.stringify(data, null, 2));
+
+  if (typeof chrome === 'undefined' || !chrome.runtime?.id) {
+    console.warn(`[Step 9] Suppression: Extension context is not available.`);
+    return;
+  }
+  
+  try {
+    const { studentInfo } = await chrome.storage.local.get('studentInfo');
+    if (!studentInfo || !studentInfo.classCode) {
+      console.warn(`[Step 9] Suppression: Student is not logged in / classCode is not set.`);
+      return;
+    }
+    
+    if (String(studentInfo.classCode).trim() !== String(data.classCode).trim()) {
+      console.warn(`[Step 9] Suppression: ClassCode mismatch. Student classCode: ${studentInfo.classCode}, Question classCode: ${data.classCode}`);
+      return;
+    }
+
+    if (data.type === 'answer_notification') {
+      const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+      if (!rollNumbers.includes(String(data.rollNumber).trim())) {
+        console.warn(`[Step 9] Suppression: Answer notification is not for this student.`);
+        return;
+      }
+    }
+
+    const { muteEndTime } = await chrome.storage.local.get('muteEndTime');
+    if (muteEndTime && Date.now() < Number(muteEndTime)) {
+      console.warn(`[Step 9] Suppression: Notifications are currently muted.`);
+      return;
+    }
+
+    questionPopupQueue.push(data);
+    processQuestionPopupQueue();
+  } catch (err) {
+    console.warn('[Step 9] Error processing storage checks:', err);
+  }
+}
+
+function processQuestionPopupQueue() {
+  if (isPopupActive) {
+    console.log(`[Step 9] Popup queued instead of immediately shown.`);
+    console.log(`Queue length:`, questionPopupQueue.length);
+    console.log(`Current popup status: Active`);
+    console.log(`Waiting popups:`, JSON.stringify(questionPopupQueue, null, 2));
+    return;
+  }
+  if (questionPopupQueue.length === 0) return;
+  isPopupActive = true;
+  const data = questionPopupQueue.shift();
+  showInAppPopup(data);
+}
+
+function showInAppPopup(data) {
+  const popup = document.createElement('div');
+  popup.id = 'labClassInAppPopup';
+  console.log(`[Step 9] Popup element created.`);
+  
+  // High z-index to overlay on any page content
+  popup.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: -450px;
+    width: 320px;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    padding: 16px;
+    z-index: 2147483647;
+    cursor: pointer;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #2c3e50;
+    transition: right 0.3s cubic-bezier(0.165, 0.84, 0.44, 1);
+    box-sizing: border-box;
+  `;
+  
+  const isAnswer = data.type === 'answer_notification';
+  
+  if (isAnswer) {
+    const solverRoll = data.solverRollNumber || '';
+    const qTitle = data.questionTitle || data.title || 'Untitled';
+
+    popup.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; user-select: none;">
+        <span style="font-weight: bold; font-size: 13px; color: #e74c3c; display: flex; align-items: center; gap: 4px;">
+          📩 New Solution Received
+        </span>
+        <span id="closePopupBtn" style="font-size: 20px; font-weight: bold; color: #aaa; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px; transition: background 0.2s, color 0.2s;">×</span>
+      </div>
+      <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 4px; user-select: none;">Solver: <strong>Roll No. ${escapeHtml(solverRoll)}</strong></div>
+      <div style="font-weight: 600; font-size: 13px; color: #2c3e50; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; user-select: none;">Question: ${escapeHtml(qTitle)}</div>
+      <div style="font-size: 11px; color: #3498db; font-weight: 500; text-align: center; margin-top: 6px; user-select: none;">Click to view solution.</div>
+    `;
+  } else {
+    const codeLines = (data.studentCode || '').split('\n');
+    const firstFour = codeLines.slice(0, 4).join('\n');
+    const hasMore = codeLines.length > 4;
+    const displayedCode = firstFour + (hasMore ? '\n...' : '');
+
+    popup.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; user-select: none;">
+        <span style="font-weight: bold; font-size: 13px; color: #e74c3c; display: flex; align-items: center; gap: 4px;">
+          📢 New Class Question
+        </span>
+        <span id="closePopupBtn" style="font-size: 20px; font-weight: bold; color: #aaa; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px; transition: background 0.2s, color 0.2s;">×</span>
+      </div>
+      <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 4px; user-select: none;">Asked by: <strong>Roll No. ${escapeHtml(data.rollNumber)}</strong></div>
+      <div style="font-weight: 600; font-size: 13px; color: #2c3e50; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; user-select: none;">${escapeHtml(data.title)}</div>
+      <pre style="margin: 0; padding: 8px 10px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #495057; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 75px; line-height: 1.4; pointer-events: none;">${escapeHtml(displayedCode)}</pre>
+    `;
+  }
+
+  document.body.appendChild(popup);
+  console.log(`[Step 9] Popup appended to DOM.`);
+  
+  // Close button hover animations
+  const closeBtn = popup.querySelector('#closePopupBtn');
+  closeBtn.onmouseover = () => {
+    closeBtn.style.color = '#333';
+    closeBtn.style.backgroundColor = '#f1f1f1';
+  };
+  closeBtn.onmouseout = () => {
+    closeBtn.style.color = '#aaa';
+    closeBtn.style.backgroundColor = 'transparent';
+  };
+
+  // Slide in
+  setTimeout(() => {
+    popup.style.right = '20px';
+    console.log(`[Step 9] Popup visible.`);
+  }, 50);
+
+  // Auto-close timer mechanics
+  const autoCloseDuration = 9000; // 9 seconds
+  let autoCloseTimer = null;
+  let startTime = Date.now();
+  let timeLeft = autoCloseDuration;
+
+  function startAutoClose(ms) {
+    startTime = Date.now();
+    autoCloseTimer = setTimeout(() => {
+      closePopup();
+    }, ms);
+  }
+
+  function pauseAutoClose() {
+    clearTimeout(autoCloseTimer);
+    timeLeft -= (Date.now() - startTime);
+    if (timeLeft < 1000) timeLeft = 1000;
+  }
+
+  function resumeAutoClose() {
+    startAutoClose(timeLeft);
+  }
+
+  startAutoClose(timeLeft);
+
+  popup.addEventListener('mouseenter', pauseAutoClose);
+  popup.addEventListener('mouseleave', resumeAutoClose);
+
+  // Click handler to open/focus dashboard question editor
+  popup.addEventListener('click', (event) => {
+    if (event.target === closeBtn || closeBtn.contains(event.target)) return;
+    
+    if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
+      chrome.runtime.sendMessage({
+        type: 'openStudentDashboard',
+        tab: isAnswer ? 'myQuestions' : 'classQuestions',
+        focusQuestion: data.questionId,
+        focusAnswer: isAnswer ? (data.answerId || '') : ''
+      });
+    }
+    closePopup();
+  });
+
+  closeBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closePopup();
+  });
+
+  function closePopup() {
+    clearTimeout(autoCloseTimer);
+    popup.removeEventListener('mouseenter', pauseAutoClose);
+    popup.removeEventListener('mouseleave', resumeAutoClose);
+    
+    // Slide out to the right
+    popup.style.right = '-450px';
+    
+    // Cleanup DOM and process next popup
+    setTimeout(() => {
+      popup.remove();
+      isPopupActive = false;
+      processQuestionPopupQueue();
+    }, 450);
+  }
+}
+
 // FCM notifications handler inside W3Schools sidebar
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'push_received') {
+    console.log(`[Step 8] Runtime message received.`);
+    console.log(`Message Type:`, message ? message.type : 'undefined');
+    console.log(`Payload:`, JSON.stringify(message, null, 2));
+
+    if (message && message.type === 'push_received') {
       const data = message.data;
-      if (data.type === 'new_question') {
+      if (data && data.type === 'new_question') {
         handleNewQuestionPush(data);
-      } else if (data.type === 'answer_notification') {
-        handleAnswerNotificationPush(data);
+        queueQuestionPopup(data);
+      } else if (data && data.type === 'answer_notification') {
+        (async () => {
+          try {
+            const { studentInfo } = await chrome.storage.local.get('studentInfo');
+            if (studentInfo && studentInfo.classCode && String(studentInfo.classCode).trim() === String(data.classCode).trim()) {
+              const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+              if (rollNumbers.includes(String(data.rollNumber).trim())) {
+                const container = document.getElementById('incomingQuestionsList');
+                if (container) {
+                  renderSidebarNotificationItem(container, {
+                    ...data,
+                    id: data.questionId,
+                    timestamp: Date.now()
+                  }, true);
+                }
+                handleAnswerNotificationPush(data);
+              }
+            }
+          } catch (err) {
+            console.warn('[content.js] Error routing answer push received message:', err);
+          }
+        })();
+        queueQuestionPopup(data);
       }
     }
   });
 }
 
-function handleNewQuestionPush(data) {
-  const container = document.getElementById('incomingQuestionsList');
-  if (!container) return;
-  
+function renderSidebarNotificationItem(container, q, isRealTime = false) {
   // Remove placeholder if present
   const placeholder = container.querySelector('div');
   if (placeholder && placeholder.textContent.includes('No incoming questions')) {
     container.innerHTML = '';
   }
   
+  const questionId = q.questionId || q.id;
+  const answerId = q.answerId || '';
+  if (!questionId) return;
+
+  const isAnswer = q.type === 'answer_notification' || q.notificationType === 'answer_notification';
+  const uniqueKey = isAnswer ? String(answerId) : String(questionId);
+  if (!uniqueKey) return;
+  
   // Check if already exists in list
-  if (container.querySelector(`[data-q-id="${data.questionId}"]`)) return;
+  if (container.querySelector(`[data-notify-id="${uniqueKey}"]`)) return;
   
   const item = document.createElement('div');
-  item.dataset.qId = data.questionId;
+  item.dataset.notifyId = uniqueKey;
   item.style.cssText = 'padding: 8px; background: #fdfefe; border: 1px solid #ebedef; border-radius: 6px; font-size: 12px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: background 0.2s; margin-bottom: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);';
   item.onmouseover = () => { item.style.backgroundColor = '#f4f6f6'; };
   item.onmouseout = () => { item.style.backgroundColor = '#fdfefe'; };
   
-  item.innerHTML = `
-    <div style="display: flex; align-items: center; justify-content: space-between;">
-      <span style="font-weight: bold; color: #2c3e50;">Roll No. ${data.rollNumber}</span>
-      <span style="font-size: 10px; color: #95a5a6;">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-    </div>
-    <div style="font-weight: 500; color: #34495e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${data.title || 'Untitled'}</div>
-  `;
+  const timeText = q.timestamp || q.createdTime
+    ? new Date(q.timestamp || q.createdTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  if (isAnswer) {
+    const solverRoll = q.solverRollNumber || '';
+    const qTitle = q.questionTitle || q.title || 'Untitled';
+
+    item.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+        <span style="font-weight: bold; color: #e74c3c; display: flex; align-items: center; gap: 4px;">📩 New Solution Received</span>
+        <span style="font-size: 10px; color: #95a5a6;">${timeText}</span>
+      </div>
+      <div style="font-size: 11px; color: #7f8c8d;">Roll No. ${escapeHtml(solverRoll)} submitted a solution.</div>
+      <div style="font-weight: 500; color: #34495e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Question: ${escapeHtml(qTitle)}</div>
+    `;
+
+    item.addEventListener('click', () => {
+      if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
+        chrome.runtime.sendMessage({
+          type: 'openStudentDashboard',
+          tab: 'myQuestions',
+          focusQuestion: questionId,
+          focusAnswer: answerId
+        });
+      }
+    });
+  } else {
+    const rollNumber = q.rollNumber || '';
+    const title = q.questionTitle || q.title || 'Untitled';
+
+    item.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+        <span style="font-weight: bold; color: #2c3e50; display: flex; align-items: center; gap: 4px;">📢 New Class Question</span>
+        <span style="font-size: 10px; color: #95a5a6;">${timeText}</span>
+      </div>
+      <div style="font-size: 11px; color: #7f8c8d;">Roll No. ${escapeHtml(rollNumber)}</div>
+      <div style="font-weight: 500; color: #34495e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Question: ${escapeHtml(title)}</div>
+    `;
+    
+    item.addEventListener('click', () => {
+      if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
+        chrome.runtime.sendMessage({
+          type: 'openStudentDashboard',
+          tab: 'classQuestions',
+          focusQuestion: questionId
+        });
+      }
+    });
+  }
   
-  item.addEventListener('click', () => {
-    window.open(chrome.runtime.getURL(`student_dashboard.html?focusQuestion=${encodeURIComponent(data.questionId)}`));
-  });
-  
-  container.insertBefore(item, container.firstChild);
+  if (isRealTime) {
+    container.insertBefore(item, container.firstChild);
+  } else {
+    container.appendChild(item);
+  }
   
   // Limit list to 5 items
   while (container.children.length > 5) {
     container.removeChild(container.lastChild);
+  }
+}
+
+async function handleNewQuestionPush(data) {
+  const container = document.getElementById('incomingQuestionsList');
+  if (!container) return;
+  
+  try {
+    // Verify that the new question matches student's classCode
+    const { studentInfo } = await chrome.storage.local.get('studentInfo');
+    if (!studentInfo || !studentInfo.classCode) return;
+    if (String(studentInfo.classCode).trim() !== String(data.classCode).trim()) return;
+
+    // Verify that the new question is NOT our own question
+    const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+    if (rollNumbers.includes(String(data.rollNumber).trim())) return;
+
+    renderSidebarNotificationItem(container, data, true);
+  } catch (err) {
+    console.warn('[handleNewQuestionPush] Error verifying studentInfo:', err);
   }
 }
 

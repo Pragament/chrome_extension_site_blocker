@@ -2,7 +2,7 @@
 // Leave optional endpoints blank until production infrastructure is ready.
 
 const CONFIG = {
-  BACKEND_BASE: "http://localhost:3000",
+  BACKEND_BASE: "https://expressjs-api-push-notifications.onrender.com",
   ADMIN_DASHBOARD_URL: "",
   HEARTBEAT_MINUTES: 1,
   REQUIRED_RULES: [

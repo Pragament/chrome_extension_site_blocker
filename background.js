@@ -1729,14 +1729,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, (updatedTab) => {
             if (updatedTab) {
               chrome.windows.update(updatedTab.windowId, { drawAttention: true, focused: true });
-              // Trigger immediate dynamic navigation
-              setTimeout(() => {
-                chrome.tabs.sendMessage(existingTab.id, {
-                  type: 'navigate_to_question',
-                  focusQuestion: focusQuestion,
-                  focusAnswer: focusAnswer
-                }).catch(() => {});
-              }, 300);
             }
           });
         } else {
@@ -2114,14 +2106,6 @@ async function handleNotificationClick(notificationId) {
         chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, (updatedTab) => {
           if (updatedTab) {
             chrome.windows.update(updatedTab.windowId, { drawAttention: true, focused: true });
-            // Trigger immediate dynamic navigation
-            setTimeout(() => {
-              chrome.tabs.sendMessage(existingTab.id, {
-                type: 'navigate_to_question',
-                focusQuestion: questionId,
-                focusAnswer: answerId
-              }).catch(() => {});
-            }, 300);
           }
           resolve();
         });

@@ -82,27 +82,16 @@ function initFab() {
     <div id="globalNotificationsSection" class="panel-section" style="border-top: 1px solid #e5edf3; padding-top: 12px; margin-top: 12px;">
       <strong style="display: flex; align-items: center; justify-content: space-between;">
         Notifications
-        <button id="muteBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Mute (10m)</button>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <button id="clearNotificationsBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; color: #000000 !important;">Clear</button>
+          <button id="muteBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Mute (10m)</button>
+        </div>
       </strong>
       <div id="incomingQuestionsList" style="margin-top: 8px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
         <div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>
       </div>
     </div>
     
-    <!-- Answer Details View -->
-    <div id="answerNotificationPanel" style="display: none; margin-top: 12px; padding: 10px; background: #e8f8f5; border: 1px solid #a3e4d7; border-radius: 6px; font-size: 12px; flex-direction: column; gap: 6px;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <strong style="color: #117864;">Answer Details</strong>
-        <span id="closeAnswerPanelBtn" style="cursor: pointer; font-weight: bold; font-size: 14px; color: #117864;">×</span>
-      </div>
-      <div id="answerPanelMeta" style="font-size: 11px; color: #16a085;"></div>
-      <div id="answerPanelDesc" style="font-style: italic; color: #2c3e50; max-height: 50px; overflow-y: auto;"></div>
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
-        <button id="copyAnswerCodeBtn" type="button" style="padding: 4px 8px; font-size: 11px; background-color: #1abc9c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Copy Code</button>
-        <button id="loadAnswerCodeBtn" type="button" style="padding: 4px 8px; font-size: 11px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Load Editor</button>
-      </div>
-    </div>
-
     <!-- Student Dashboard Section -->
     <div id="globalDashboardSection" class="panel-section" style="border-top: 1px solid #e5edf3; padding-top: 12px; margin-top: 12px;">
       <strong>Student Dashboard</strong>
@@ -283,18 +272,21 @@ function initFab() {
           if (!container) return;
           container.innerHTML = '';
 
-          // 1. Read local notificationHistory
+           // 1. Read local notificationHistory & clear time
           let localNotifications = [];
+          let clearTime = 0;
           try {
-            const stored = await chrome.storage.local.get('notificationHistory');
+            const stored = await chrome.storage.local.get(['notificationHistory', 'notificationsClearTime']);
             localNotifications = stored.notificationHistory || [];
+            clearTime = Number(stored.notificationsClearTime || 0);
           } catch (storageErr) {
             console.warn('[content.js] Failed to fetch notificationHistory:', storageErr);
           }
           
-          // 2. Filter local notificationHistory to match classCode
+          // 2. Filter local notificationHistory to match classCode and clear time
           const classNotifications = localNotifications.filter(n => 
-            n.data && String(n.data.classCode).trim() === String(studentInfo.classCode).trim()
+            n.data && String(n.data.classCode).trim() === String(studentInfo.classCode).trim() &&
+            Number(n.timestamp || 0) > clearTime
           );
 
           // 3. Map local notifications to display format
@@ -315,11 +307,13 @@ function initFab() {
             ? response.questions 
             : [];
           
-          // Filter out our own questions from server list
+          // Filter out our own questions from server list and filter by clearTime
           const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
-          const filteredServerQuestions = serverQuestions.filter(q => 
-            !rollNumbers.includes(String(q.rollNumber).trim())
-          );
+          const filteredServerQuestions = serverQuestions.filter(q => {
+            const isOwn = rollNumbers.includes(String(q.rollNumber).trim());
+            const created = new Date(q.createdAt || q.createdTime || 0).getTime();
+            return !isOwn && created > clearTime;
+          });
 
           // 5. Merge lists, deduplicating on unique event ID (answerId for answer notifications, questionId for question notifications)
           const merged = [];
@@ -517,7 +511,6 @@ function buildGrammarPrompt(userPrompt) {
 function initW3SchoolsCodeHelp() {
   if (window.__labPolicyW3SchoolsCodeHelpInitialized) return;
   window.__labPolicyW3SchoolsCodeHelpInitialized = true;
-  let activeAnswerCode = '';
 
   console.debug('[site-blocker] W3Schools code help initializing', {
     url: window.location.href,
@@ -994,45 +987,27 @@ function initW3SchoolsCodeHelp() {
       });
     }
 
-    // Answer Details Panel actions
-    const closeAnswerPanelBtn = document.getElementById('closeAnswerPanelBtn');
-    const copyAnswerCodeBtn = document.getElementById('copyAnswerCodeBtn');
-    const loadAnswerCodeBtn = document.getElementById('loadAnswerCodeBtn');
-    const answerNotificationPanel = document.getElementById('answerNotificationPanel');
-
-    if (closeAnswerPanelBtn) {
-      closeAnswerPanelBtn.addEventListener('click', () => {
-        if (answerNotificationPanel) answerNotificationPanel.style.display = 'none';
-      });
-    }
-
-    if (copyAnswerCodeBtn) {
-      copyAnswerCodeBtn.addEventListener('click', () => {
-        if (activeAnswerCode) {
-          copyToClipboard(activeAnswerCode);
-          const originalText = copyAnswerCodeBtn.textContent;
-          copyAnswerCodeBtn.textContent = 'Copied!';
-          setTimeout(() => { copyAnswerCodeBtn.textContent = originalText; }, 1500);
-        } else {
-          alert('No answer code found to copy.');
+    const clearNotificationsBtn = document.getElementById('clearNotificationsBtn');
+    if (clearNotificationsBtn) {
+      clearNotificationsBtn.addEventListener('click', async () => {
+        if (!isExtensionContextAvailable()) return;
+        console.log('[content.js] Clearing local notification history...');
+        
+        // Immediately empty the DOM container list
+        const container = document.getElementById('incomingQuestionsList');
+        if (container) {
+          container.innerHTML = '<div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>';
         }
-      });
-    }
 
-    if (loadAnswerCodeBtn) {
-      loadAnswerCodeBtn.style.display = isW3SchoolsTryEditorPage() ? 'inline-block' : 'none';
-      loadAnswerCodeBtn.addEventListener('click', () => {
-        if (activeAnswerCode) {
-          const success = writeW3SchoolsCode(activeAnswerCode);
-          if (success) {
-            const originalText = loadAnswerCodeBtn.textContent;
-            loadAnswerCodeBtn.textContent = 'Loaded!';
-            setTimeout(() => { loadAnswerCodeBtn.textContent = originalText; }, 1500);
-          } else {
-            alert('Failed to load code into editor.');
-          }
-        } else {
-          alert('No answer code found to load.');
+        try {
+          await chrome.storage.local.set({
+            notificationHistory: [],
+            notificationsClearTime: Date.now()
+          });
+          // Update the panel display in the background
+          await updateDisplay();
+        } catch (err) {
+          console.warn('[content.js] Failed to clear notificationHistory:', err);
         }
       });
     }
@@ -1549,7 +1524,6 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
                     timestamp: Date.now()
                   }, true);
                 }
-                handleAnswerNotificationPush(data);
               }
             }
           } catch (err) {
@@ -1669,44 +1643,6 @@ async function handleNewQuestionPush(data) {
   }
 }
 
-async function handleAnswerNotificationPush(data) {
-  const panel = document.getElementById('answerNotificationPanel');
-  const meta = document.getElementById('answerPanelMeta');
-  const desc = document.getElementById('answerPanelDesc');
-  if (!panel || !meta || !desc) return;
-  
-  console.log('[Content] Answer push received, fetching details for:', data.questionId);
-  
-  meta.textContent = `Roll No. ${data.solverRollNumber} answered your question!`;
-  desc.textContent = 'Loading response details...';
-  panel.style.display = 'flex';
-  
-  try {
-    const res = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'fetchQuestionResponses', questionId: data.questionId }, resolve);
-    });
-    
-    if (res && res.success && res.responses) {
-      // Find the solver's response
-      const reply = res.responses.find(r => String(r.authorId) === String(data.solverRollNumber));
-      if (reply) {
-        desc.textContent = reply.explanation || '(No explanation provided)';
-        // Set code variable in parent scope
-        activeAnswerCode = reply.correctedCode || '';
-      } else {
-        desc.textContent = 'Reply details could not be found.';
-        activeAnswerCode = '';
-      }
-    } else {
-      desc.textContent = 'Failed to load reply description.';
-      activeAnswerCode = '';
-    }
-  } catch (err) {
-    console.error('[Content] Error fetching reply details:', err);
-    desc.textContent = 'Error loading reply details.';
-    activeAnswerCode = '';
-  }
-}
 
 function copyToClipboard(text) {
   const textarea = document.createElement('textarea');

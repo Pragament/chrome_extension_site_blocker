@@ -530,6 +530,10 @@ async function viewQuestionAnswers(question, highlightAnswerId = null) {
         setTimeout(() => {
           item.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 150);
+        // Automatically navigate directly to the detailed workspace code viewer
+        setTimeout(() => {
+          openAnswerViewerWorkspace(question, resp);
+        }, 300);
       }
     });
   } catch (error) {

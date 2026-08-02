@@ -68,8 +68,8 @@ function initFab() {
       <strong>W3Schools editor</strong>
       <button id="askClassBtn" type="button">Ask Class</button>
       <div id="askClassForm" style="display: none; flex-direction: column; gap: 8px; margin-top: 8px;">
-        <input type="text" id="qTitle" placeholder="Question Title (Required)" style="padding: 6px; font-size: 13px; width: 100%; box-sizing: border-box;">
-        <textarea id="qDesc" placeholder="Short Description (Required)" style="padding: 6px; font-size: 13px; height: 60px; resize: none; border-radius: 6px; border: 1px solid #ccc; font-family: sans-serif; width: 100%; box-sizing: border-box;"></textarea>
+        <input type="text" id="qTitle" placeholder="Question Title (Optional)" style="padding: 6px; font-size: 13px; width: 100%; box-sizing: border-box;">
+        <textarea id="qDesc" placeholder="Short Description (Optional)" style="padding: 6px; font-size: 13px; height: 60px; resize: none; border-radius: 6px; border: 1px solid #ccc; font-family: sans-serif; width: 100%; box-sizing: border-box;"></textarea>
         <div style="display: flex; gap: 8px; width: 100%;">
           <button id="submitQBtn" type="button" style="flex: 1; padding: 6px; font-size: 13px; background-color: #2ecc71;">Submit</button>
           <button id="cancelQBtn" type="button" style="flex: 1; padding: 6px; font-size: 13px; background-color: #95a5a6;">Cancel</button>
@@ -181,7 +181,10 @@ function initFab() {
   // Toggle panel
   fab.addEventListener('click', (e) => {
     e.stopPropagation(); // Prevent closing when clicking button
-    panel.classList.toggle('open');
+    const isOpen = panel.classList.toggle('open');
+    if (isOpen) {
+      updateDisplay();
+    }
   });
 
   document.querySelector('#labClassPanel .close-btn').addEventListener('click', () => {
@@ -283,11 +286,21 @@ function initFab() {
             console.warn('[content.js] Failed to fetch notificationHistory:', storageErr);
           }
           
-          // 2. Filter local notificationHistory to match classCode and clear time
-          const classNotifications = localNotifications.filter(n => 
-            n.data && String(n.data.classCode).trim() === String(studentInfo.classCode).trim() &&
-            Number(n.timestamp || 0) > clearTime
-          );
+          // 2. Filter local notificationHistory to match classCode, student's roll number, and clear time
+          const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+          const classNotifications = localNotifications.filter(n => {
+            if (!n.data) return false;
+            const classMatch = String(n.data.classCode).trim() === String(studentInfo.classCode).trim();
+            const timeMatch = Number(n.timestamp || 0) > clearTime;
+            
+            if (n.type === 'answer_notification') {
+              // For answer notifications, the current student must be the asker
+              return classMatch && timeMatch && rollNumbers.includes(String(n.data.rollNumber).trim());
+            } else {
+              // For classmate questions, the current student should NOT be the asker
+              return classMatch && timeMatch && !rollNumbers.includes(String(n.data.rollNumber).trim());
+            }
+          });
 
           // 3. Map local notifications to display format
           const formattedNotifications = classNotifications.map(n => ({
@@ -308,7 +321,6 @@ function initFab() {
             : [];
           
           // Filter out our own questions from server list and filter by clearTime
-          const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
           const filteredServerQuestions = serverQuestions.filter(q => {
             const isOwn = rollNumbers.includes(String(q.rollNumber).trim());
             const created = new Date(q.createdAt || q.createdTime || 0).getTime();
@@ -475,10 +487,10 @@ function initFab() {
     }
   });
 
-  // Auto-update button if changed from options page
+  // Auto-update button if changed from options page or if notificationHistory updates
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes) => {
-      if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache) {
+      if (changes.studentInfo || changes.pcCode || changes.labClassFabPosition || changes.whitelist || changes.classWishlistCache || changes.notificationHistory) {
         updateDisplay();
       }
     });
@@ -861,17 +873,8 @@ function initW3SchoolsCodeHelp() {
         return;
       }
 
-      const title = qTitle.value.trim();
-      const description = qDesc.value.trim();
-
-      if (!title) {
-        setStatus('Title is required.');
-        return;
-      }
-      if (!description) {
-        setStatus('Description is required.');
-        return;
-      }
+      const title = qTitle.value.trim() || 'Untitled';
+      const description = qDesc.value.trim() || 'No description provided';
 
       const code = readW3SchoolsCode();
       if (!code || !code.trim() || code === 'No code found') {

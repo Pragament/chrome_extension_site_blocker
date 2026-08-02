@@ -755,8 +755,8 @@ function initStudentDashboardListeners() {
     const correctedCode = editor ? editor.value : "";
     const explanation = explanationText ? explanationText.value.trim() : "";
     
-    if (!correctedCode.trim() || !explanation.trim()) {
-      alert("Please provide both the corrected code and explanation.");
+    if (!correctedCode.trim()) {
+      alert("Please provide the corrected code.");
       return;
     }
     
@@ -930,7 +930,11 @@ async function loadStudentInfo() {
 async function initializeDashboard() {
   console.log("[Init] initializeDashboard called.");
   await loadStudentInfo();
-  console.log('[FCM] Dashboard initial setup deferred. Registration must happen only on Update click.');
+  if (typeof setupFCM === 'function') {
+    setupFCM().catch(err => {
+      console.warn('[FCM] setupFCM during initializeDashboard failed:', err);
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {

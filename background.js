@@ -2004,29 +2004,37 @@ async function handleIncomingPushData(data) {
 
   // Save to local notification history
   try {
-    const { notificationHistory = [] } = await chrome.storage.local.get('notificationHistory');
+    let { notificationHistory = [] } = await chrome.storage.local.get('notificationHistory');
     
     const targetUniqueId = data.type === 'answer_notification' ? String(data.answerId || '') : String(data.questionId || '');
-    const exists = notificationHistory.some(n => {
+    
+    // Find index of existing notification
+    const existingIndex = notificationHistory.findIndex(n => {
       const existingUniqueId = n.type === 'answer_notification' ? String(n.data?.answerId || '') : String(n.data?.questionId || '');
       return existingUniqueId === targetUniqueId && n.type === data.type;
     });
 
-    if (!exists) {
-      notificationHistory.unshift({
-        id: data.type === 'answer_notification' ? `${data.questionId}|${data.answerId}` : String(data.questionId || Date.now()),
-        type: data.type,
-        data: data,
-        timestamp: Date.now()
-      });
-      if (notificationHistory.length > 20) {
-        notificationHistory.pop();
-      }
-      await chrome.storage.local.set({ notificationHistory });
-      console.log('[FCM Service Worker] Saved notification to local history:', data.questionId, 'type:', data.type);
+    if (existingIndex !== -1) {
+      // Remove the existing entry so we can move it to the top
+      notificationHistory.splice(existingIndex, 1);
     }
+
+    // Insert the new/updated entry at the beginning of the history
+    notificationHistory.unshift({
+      id: data.type === 'answer_notification' ? `${data.questionId}|${data.answerId}` : String(data.questionId || Date.now()),
+      type: data.type,
+      data: data,
+      timestamp: Date.now()
+    });
+
+    if (notificationHistory.length > 20) {
+      notificationHistory.pop();
+    }
+    
+    await chrome.storage.local.set({ notificationHistory });
+    console.log('[FCM Service Worker] Saved/Updated notification in local history:', data.questionId, 'type:', data.type);
   } catch (err) {
-    console.warn('[FCM Service Worker] Failed to save to notificationHistory:', err);
+    console.warn('[FCM Service Worker] Failed to save/update notificationHistory:', err);
   }
 
   // If answer notification, save to unreadSolutions storage

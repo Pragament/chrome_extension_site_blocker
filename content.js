@@ -83,6 +83,7 @@ function initFab() {
       <strong style="display: flex; align-items: center; justify-content: space-between;">
         Notifications
         <div style="display: flex; gap: 4px; align-items: center;">
+          <button id="refreshNotificationsBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; color: #000000 !important;">Refresh</button>
           <button id="clearNotificationsBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; color: #000000 !important;">Clear</button>
           <button id="muteBtn" type="button" style="padding: 2px 6px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Mute (10m)</button>
         </div>
@@ -265,118 +266,7 @@ function initFab() {
 
       // Populate sidebar notifications list
       if (studentInfo.classCode) {
-        chrome.runtime.sendMessage({
-          type: 'fetchOpenQuestions',
-          classCode: studentInfo.classCode,
-          limit: 5,
-          offset: 0
-        }, async (response) => {
-          const container = document.getElementById('incomingQuestionsList');
-          if (!container) return;
-          container.innerHTML = '';
-
-           // 1. Read local notificationHistory & clear time
-          let localNotifications = [];
-          let clearTime = 0;
-          try {
-            const stored = await chrome.storage.local.get(['notificationHistory', 'notificationsClearTime']);
-            localNotifications = stored.notificationHistory || [];
-            clearTime = Number(stored.notificationsClearTime || 0);
-          } catch (storageErr) {
-            console.warn('[content.js] Failed to fetch notificationHistory:', storageErr);
-          }
-          
-          // 2. Filter local notificationHistory to match classCode, student's roll number, and clear time
-          const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
-          const classNotifications = localNotifications.filter(n => {
-            if (!n.data) return false;
-            const classMatch = String(n.data.classCode).trim() === String(studentInfo.classCode).trim();
-            const timeMatch = Number(n.timestamp || 0) > clearTime;
-            
-            if (n.type === 'answer_notification') {
-              // For answer notifications, the current student must be the asker
-              return classMatch && timeMatch && rollNumbers.includes(String(n.data.rollNumber).trim());
-            } else {
-              // For classmate questions, the current student should NOT be the asker
-              return classMatch && timeMatch && !rollNumbers.includes(String(n.data.rollNumber).trim());
-            }
-          });
-
-          // 3. Map local notifications to display format
-          const formattedNotifications = classNotifications.map(n => ({
-            id: n.data.questionId,
-            questionId: n.data.questionId,
-            answerId: n.data.answerId || '',
-            type: n.type,
-            title: n.data.questionTitle || n.data.title || 'Untitled',
-            rollNumber: n.data.rollNumber,
-            solverRollNumber: n.data.solverRollNumber || '',
-            timestamp: n.timestamp,
-            createdTime: n.timestamp
-          }));
-
-          // 4. Fetch open questions from server
-          const serverQuestions = (response && response.success && Array.isArray(response.questions)) 
-            ? response.questions 
-            : [];
-          
-          // Filter out our own questions from server list and filter by clearTime
-          const filteredServerQuestions = serverQuestions.filter(q => {
-            const isOwn = rollNumbers.includes(String(q.rollNumber).trim());
-            const created = new Date(q.createdAt || q.createdTime || 0).getTime();
-            return !isOwn && created > clearTime;
-          });
-
-          // 5. Merge lists, deduplicating on unique event ID (answerId for answer notifications, questionId for question notifications)
-          const merged = [];
-          const seenIds = new Set();
-
-          // Add local ones first
-          formattedNotifications.forEach(n => {
-            const uid = n.type === 'answer_notification' ? String(n.answerId) : String(n.questionId);
-            if (uid && !seenIds.has(uid)) {
-              seenIds.add(uid);
-              merged.push(n);
-            }
-          });
-
-          // Add server questions next
-          filteredServerQuestions.forEach(q => {
-            const qId = q.id || q.questionId;
-            const uid = String(qId);
-            if (uid && !seenIds.has(uid)) {
-              seenIds.add(uid);
-              merged.push({
-                id: qId,
-                questionId: qId,
-                answerId: '',
-                type: 'new_question',
-                title: q.questionTitle || q.title || 'Untitled',
-                rollNumber: q.rollNumber,
-                solverRollNumber: '',
-                timestamp: q.createdAt || q.createdTime || Date.now(),
-                createdTime: q.createdAt || q.createdTime || Date.now()
-              });
-            }
-          });
-
-          // Sort merged list chronologically, newest first
-          merged.sort((a, b) => {
-            const timeA = new Date(a.timestamp || a.createdTime || 0);
-            const timeB = new Date(b.timestamp || b.createdTime || 0);
-            return timeB - timeA;
-          });
-
-          // 6. Render
-          if (merged.length === 0) {
-            container.innerHTML = '<div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>';
-          } else {
-            // Limit to 5 items total
-            merged.slice(0, 5).forEach(item => {
-              renderSidebarNotificationItem(container, item, false);
-            });
-          }
-        });
+        loadSidebarQuestions(studentInfo, false);
       } else {
         const container = document.getElementById('incomingQuestionsList');
         if (container) {
@@ -990,6 +880,26 @@ function initW3SchoolsCodeHelp() {
       });
     }
 
+    const refreshNotificationsBtn = document.getElementById('refreshNotificationsBtn');
+    if (refreshNotificationsBtn) {
+      refreshNotificationsBtn.addEventListener('click', async () => {
+        if (!isExtensionContextAvailable()) return;
+        console.log('[content.js] Manual refresh clicked. Fetching fresh questions...');
+        const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
+        if (studentInfo.classCode) {
+          refreshNotificationsBtn.disabled = true;
+          const oldText = refreshNotificationsBtn.textContent;
+          refreshNotificationsBtn.textContent = '...';
+          try {
+            await loadSidebarQuestions(studentInfo, true);
+          } finally {
+            refreshNotificationsBtn.disabled = false;
+            refreshNotificationsBtn.textContent = oldText;
+          }
+        }
+      });
+    }
+
     const clearNotificationsBtn = document.getElementById('clearNotificationsBtn');
     if (clearNotificationsBtn) {
       clearNotificationsBtn.addEventListener('click', async () => {
@@ -1005,7 +915,8 @@ function initW3SchoolsCodeHelp() {
         try {
           await chrome.storage.local.set({
             notificationHistory: [],
-            notificationsClearTime: Date.now()
+            notificationsClearTime: Date.now(),
+            cachedClassQuestions: [] // Also clear cached questions on user clear
           });
           // Update the panel display in the background
           await updateDisplay();
@@ -1379,9 +1290,26 @@ function showInAppPopup(data) {
     box-sizing: border-box;
   `;
   
-  const isAnswer = data.type === 'answer_notification';
+  const isAnnouncement = data.type === 'announcement';
   
-  if (isAnswer) {
+  if (isAnnouncement) {
+    const teacherName = data.teacherName || 'Teacher';
+    const annTitle = data.title || 'Untitled';
+    const annDesc = data.description || '';
+
+    popup.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; user-select: none;">
+        <span style="font-weight: bold; font-size: 13px; color: #3498db; display: flex; align-items: center; gap: 4px;">
+          📢 New Announcement
+        </span>
+        <span id="closePopupBtn" style="font-size: 20px; font-weight: bold; color: #aaa; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px; transition: background 0.2s, color 0.2s;">×</span>
+      </div>
+      <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 4px; user-select: none;">By: <strong>${escapeHtml(teacherName)}</strong></div>
+      <div style="font-weight: 600; font-size: 13px; color: #2c3e50; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; user-select: none;">Title: ${escapeHtml(annTitle)}</div>
+      <div style="font-size: 11.5px; color: #555; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; margin-bottom: 8px; user-select: none;">${escapeHtml(annDesc)}</div>
+      <div style="font-size: 11px; color: #3498db; font-weight: 500; text-align: center; margin-top: 6px; user-select: none;">Click to view announcement.</div>
+    `;
+  } else if (isAnswer) {
     const solverRoll = data.solverRollNumber || '';
     const qTitle = data.questionTitle || data.title || 'Untitled';
 
@@ -1468,12 +1396,20 @@ function showInAppPopup(data) {
     if (event.target === closeBtn || closeBtn.contains(event.target)) return;
     
     if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
-      chrome.runtime.sendMessage({
-        type: 'openStudentDashboard',
-        tab: isAnswer ? 'myQuestions' : 'classQuestions',
-        focusQuestion: data.questionId,
-        focusAnswer: isAnswer ? (data.answerId || '') : ''
-      });
+      if (isAnnouncement) {
+        chrome.runtime.sendMessage({
+          type: 'openStudentDashboard',
+          tab: 'home',
+          focusAnnouncement: data.announcementId
+        });
+      } else {
+        chrome.runtime.sendMessage({
+          type: 'openStudentDashboard',
+          tab: isAnswer ? 'myQuestions' : 'classQuestions',
+          focusQuestion: data.questionId,
+          focusAnswer: isAnswer ? (data.answerId || '') : ''
+        });
+      }
     }
     closePopup();
   });
@@ -1533,6 +1469,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
             console.warn('[content.js] Error routing answer push received message:', err);
           }
         })();
+        queueQuestionPopup(data);
+      } else if (data && data.type === 'announcement') {
         queueQuestionPopup(data);
       }
     }
@@ -1627,9 +1565,6 @@ function renderSidebarNotificationItem(container, q, isRealTime = false) {
 }
 
 async function handleNewQuestionPush(data) {
-  const container = document.getElementById('incomingQuestionsList');
-  if (!container) return;
-  
   try {
     // Verify that the new question matches student's classCode
     const { studentInfo } = await chrome.storage.local.get('studentInfo');
@@ -1640,9 +1575,10 @@ async function handleNewQuestionPush(data) {
     const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
     if (rollNumbers.includes(String(data.rollNumber).trim())) return;
 
-    renderSidebarNotificationItem(container, data, true);
+    console.log('[content.js] New question push received. Refreshing cached open questions...');
+    await loadSidebarQuestions(studentInfo, true);
   } catch (err) {
-    console.warn('[handleNewQuestionPush] Error verifying studentInfo:', err);
+    console.warn('[handleNewQuestionPush] Error handling new question push:', err);
   }
 }
 
@@ -1687,3 +1623,144 @@ function copyToClipboard(text) {
     }
   });
 })();
+
+async function loadSidebarQuestions(studentInfo, forceRefresh = false) {
+  if (!studentInfo || !studentInfo.classCode) {
+    const container = document.getElementById('incomingQuestionsList');
+    if (container) {
+      container.innerHTML = '<div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>';
+    }
+    return;
+  }
+
+  const container = document.getElementById('incomingQuestionsList');
+  if (!container) return;
+
+  // 1. Read local notificationHistory & clear time & cached questions
+  let localNotifications = [];
+  let clearTime = 0;
+  let cachedQuestions = [];
+  try {
+    const stored = await chrome.storage.local.get(['notificationHistory', 'notificationsClearTime', 'cachedClassQuestions']);
+    localNotifications = stored.notificationHistory || [];
+    clearTime = Number(stored.notificationsClearTime || 0);
+    cachedQuestions = stored.cachedClassQuestions || [];
+  } catch (storageErr) {
+    console.warn('[content.js] Failed to fetch notificationHistory/cache:', storageErr);
+  }
+
+  const twentyFourHoursAgoMs = Date.now() - 24 * 60 * 60 * 1000;
+
+  const rollNumbers = String(studentInfo.rollNumber || '').split('-').map(r => r.trim());
+  const classNotifications = localNotifications.filter(n => {
+    if (!n.data) return false;
+    const classMatch = String(n.data.classCode).trim() === String(studentInfo.classCode).trim();
+    const timeMatch = Number(n.timestamp || 0) > clearTime && Number(n.timestamp || 0) >= twentyFourHoursAgoMs;
+    
+    if (n.type === 'answer_notification') {
+      return classMatch && timeMatch && rollNumbers.includes(String(n.data.rollNumber).trim());
+    } else {
+      return classMatch && timeMatch && !rollNumbers.includes(String(n.data.rollNumber).trim());
+    }
+  });
+
+  const formattedNotifications = classNotifications.map(n => ({
+    id: n.data.questionId,
+    questionId: n.data.questionId,
+    answerId: n.data.answerId || '',
+    type: n.type,
+    title: n.data.questionTitle || n.data.title || 'Untitled',
+    rollNumber: n.data.rollNumber,
+    solverRollNumber: n.data.solverRollNumber || '',
+    timestamp: n.timestamp,
+    createdTime: n.timestamp
+  }));
+
+  const processAndRender = (serverQuestions) => {
+    const filteredServerQuestions = serverQuestions.filter(q => {
+      const isOwn = rollNumbers.includes(String(q.rollNumber).trim());
+      const created = new Date(q.createdAt || q.createdTime || 0).getTime();
+      return !isOwn && created > clearTime;
+    });
+
+    const merged = [];
+    const seenIds = new Set();
+
+    // Add local ones first
+    formattedNotifications.forEach(n => {
+      const uid = n.type === 'answer_notification' ? String(n.answerId) : String(n.questionId);
+      if (uid && !seenIds.has(uid)) {
+        seenIds.add(uid);
+        merged.push(n);
+      }
+    });
+
+    // Add server questions next
+    filteredServerQuestions.forEach(q => {
+      const qId = q.id || q.questionId;
+      const uid = String(qId);
+      if (uid && !seenIds.has(uid)) {
+        seenIds.add(uid);
+        merged.push({
+          id: qId,
+          questionId: qId,
+          answerId: '',
+          type: 'new_question',
+          title: q.questionTitle || q.title || 'Untitled',
+          rollNumber: q.rollNumber,
+          solverRollNumber: '',
+          timestamp: q.createdAt || q.createdTime || Date.now(),
+          createdTime: q.createdAt || q.createdTime || Date.now()
+        });
+      }
+    });
+
+    // Sort merged list chronologically, newest first
+    merged.sort((a, b) => {
+      const timeA = new Date(a.timestamp || a.createdTime || 0);
+      const timeB = new Date(b.timestamp || b.createdTime || 0);
+      return timeB - timeA;
+    });
+
+    // Render
+    if (merged.length === 0) {
+      container.innerHTML = '<div style="font-size: 11px; color: #888; text-align: center; padding: 10px;">No incoming questions.</div>';
+    } else {
+      container.innerHTML = '';
+      merged.slice(0, 5).forEach(item => {
+        renderSidebarNotificationItem(container, item, false);
+      });
+    }
+  };
+
+  const recentCachedQuestions = cachedQuestions.filter(q => {
+    const created = new Date(q.createdAt || q.createdTime || 0).getTime();
+    return created >= twentyFourHoursAgoMs;
+  });
+
+  if (recentCachedQuestions.length > 0 && !forceRefresh) {
+    console.debug('[content.js] Loading class questions from local storage cache');
+    processAndRender(recentCachedQuestions);
+  } else {
+    console.debug('[content.js] Fetching fresh class questions from network (forceRefresh = ' + forceRefresh + ')');
+    chrome.runtime.sendMessage({
+      type: 'fetchOpenQuestions',
+      classCode: studentInfo.classCode,
+      limit: 3,
+      offset: 0
+    }, async (response) => {
+      const serverQuestions = (response && response.success && Array.isArray(response.questions)) 
+        ? response.questions 
+        : [];
+      
+      // Update cache in local storage
+      try {
+        await chrome.storage.local.set({ cachedClassQuestions: serverQuestions });
+      } catch (err) {
+        console.warn('[content.js] Failed to save cachedClassQuestions:', err);
+      }
+
+      processAndRender(serverQuestions);
+    });
+  }
+}

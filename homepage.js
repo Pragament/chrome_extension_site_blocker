@@ -899,8 +899,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Trigger an async direct fetch to refresh cache
-        if (studentInfo.classCode) {
+        // Trigger an async direct fetch to refresh cache only if missing or mismatched
+        if (studentInfo.classCode && (!classWishlistCache || classWishlistCache.classCode !== studentInfo.classCode)) {
             fetchClassDetailsDirectly(studentInfo.classCode).then(details => {
                 if (details.found) {
                     const cache = {
@@ -1005,7 +1005,113 @@ document.addEventListener('DOMContentLoaded', () => {
             classCodeInput.value = result.studentInfo.classCode;
         }
         updateIframeSrc(result.studentInfo);
+        loadHomepageAnnouncements();
     });
+
+    // Announcements Integration
+    const refreshBtn = document.getElementById("homepage-announcements-refresh-btn");
+    if (refreshBtn) {
+        refreshBtn.addEventListener("click", () => {
+            loadHomepageAnnouncements();
+        });
+    }
+
+    async function loadHomepageAnnouncements(focusId = null) {
+        const listEl = document.getElementById("homepage-announcements-list");
+        if (!listEl) return;
+        
+        listEl.innerHTML = "<p style='color: #7f8c8d; font-style: italic; margin: 0;'>Loading announcements...</p>";
+        
+        try {
+            const res = await new Promise((resolve) => {
+                chrome.storage.local.get(['studentInfo'], resolve);
+            });
+            const studentInfo = res.studentInfo || {};
+            const classCode = String(studentInfo.classCode || '').trim();
+            
+            if (!classCode) {
+                listEl.innerHTML = "<p style='color: #ef4444; font-weight: bold; margin: 0;'>Error: Class Code is missing. Please connect to a class first.</p>";
+                return;
+            }
+            
+            const response = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({
+                    type: "fetchAnnouncements",
+                    classCode: classCode,
+                    limit: 3,
+                    offset: 0
+                }, resolve);
+            });
+            
+            listEl.innerHTML = "";
+            const list = response?.announcements || [];
+            if (list.length === 0) {
+                listEl.innerHTML = "<p style='color: #7f8c8d; font-style: italic; margin: 0;'>No announcements available.</p>";
+                return;
+            }
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const focusAnnId = focusId || urlParams.get('focusAnnouncement');
+            let highlightTriggered = false;
+            
+            list.forEach(ann => {
+                const item = document.createElement("div");
+                const isFocused = focusAnnId && String(ann.id || ann.announcementId) === String(focusAnnId);
+                
+                if (isFocused) {
+                    highlightTriggered = true;
+                    item.style.cssText = "border: 2px solid var(--secondary); background: #f0f9ff; padding: 12px; border-radius: 8px; margin-bottom: 10px; text-align: left; transform: scale(1.01); transition: all 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.06);";
+                } else {
+                    item.style.cssText = "border-bottom: 1px solid #e1e8ed; padding: 10px 0; text-align: left;";
+                }
+                
+                let createdDate = 'Recent';
+                if (ann.createdAt) {
+                    if (typeof ann.createdAt === 'string') {
+                        createdDate = new Date(ann.createdAt).toLocaleString();
+                    } else if (ann.createdAt.seconds) {
+                        createdDate = new Date(ann.createdAt.seconds * 1000).toLocaleString();
+                    }
+                }
+                
+                const title = ann.title || 'Announcement';
+                const desc = ann.description || ann.message || '';
+                const teacherName = ann.teacherName || 'Teacher';
+
+                item.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                        <h5 style="margin: 0; color: var(--primary); font-size: 1.05rem; font-weight: bold;">📌 ${escapeHtml(title)}</h5>
+                        <span style="font-size: 0.8rem; color: #7f8c8d;">${createdDate}</span>
+                    </div>
+                    <p style="margin: 0 0 6px 0; font-size: 0.95rem; color: #333; white-space: pre-wrap; word-break: break-word;">${escapeHtml(desc)}</p>
+                    <div style="font-size: 0.8rem; color: #7f8c8d;">By: <strong>${escapeHtml(teacherName)}</strong></div>
+                `;
+                listEl.appendChild(item);
+            });
+            
+            if (highlightTriggered) {
+                setTimeout(() => {
+                    const section = document.getElementById("homepage-announcements-section");
+                    if (section) {
+                        section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }, 250);
+            }
+        } catch (error) {
+            console.error("[Homepage] Error loading announcements:", error);
+            listEl.innerHTML = "<p style='color: #ef4444; font-style: italic; margin: 0;'>Error loading announcements.</p>";
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
 
     // ============================================================
     // Inactivity Auto-Logout Tracker
@@ -1044,6 +1150,18 @@ document.addEventListener('DOMContentLoaded', () => {
             chrome.runtime.onMessage.addListener((message) => {
                 if (message && message.type === 'autoLoggedOut') {
                     window.location.reload();
+                } else if (message && message.type === 'push_received') {
+                    const data = message.data;
+                    if (data && data.type === 'announcement') {
+                        console.log('[Homepage] Realtime announcement push received:', data);
+                        loadHomepageAnnouncements();
+                    }
+                } else if (message && message.type === 'navigate_to_announcement') {
+                    console.log('[Homepage] Dynamic announcement navigation requested:', message);
+                    const focusAnnId = message.focusAnnouncement;
+                    if (focusAnnId) {
+                        loadHomepageAnnouncements(focusAnnId);
+                    }
                 }
             });
         }

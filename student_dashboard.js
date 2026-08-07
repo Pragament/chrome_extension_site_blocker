@@ -63,7 +63,8 @@ const SCREENS = [
   "solvingWorkspaceScreen",
   "myQuestionsScreen",
   "viewAnswersScreen",
-  "answerViewerScreen"
+  "answerViewerScreen",
+  "announcementsScreen"
 ];
 
 function pushScreen(screenId) {
@@ -186,6 +187,16 @@ async function loadClassQuestions(append = false) {
       offset: classQuestionsOffset
     });
     console.log("[Firestore Query] Received response for fetchOpenQuestions:", response);
+    
+    if (response && response.success === false) {
+      const errorMsg = `Class Questions fetch failed. Reason: ${response.errorType || 'Unknown error'}. Details: ${response.error || ''}`;
+      console.error(errorMsg);
+      const listEl = $("classQuestionsList");
+      if (listEl && !append) {
+        listEl.innerHTML = `<p style='color: #ef4444; font-weight: bold;'>Error loading class questions: ${escapeHtml(response.errorType || "Query failed")}</p>`;
+      }
+      return;
+    }
     
     if (!append) {
       const listEl = $("classQuestionsList");
@@ -318,6 +329,16 @@ async function loadMyQuestions(append = false) {
       offset: myQuestionsOffset
     });
     console.log("[Firestore Query] Received response for fetchMyQuestions:", response);
+
+    if (response && response.success === false) {
+      const errorMsg = `My Questions fetch failed. Reason: ${response.errorType || 'Unknown error'}. Details: ${response.error || ''}`;
+      console.error(errorMsg);
+      const listEl = $("myQuestionsList");
+      if (listEl && !append) {
+        listEl.innerHTML = `<p style='color: #ef4444; font-weight: bold;'>Error loading my questions: ${escapeHtml(response.errorType || "Query failed")}</p>`;
+      }
+      return;
+    }
     
     let viewedAnswers = {};
     try {
@@ -713,11 +734,23 @@ function initStudentDashboardListeners() {
     loadMyQuestions(false);
   });
 
+  safeAddListener("goToAnnouncementsBtn", "click", () => {
+    pushScreen("announcementsScreen");
+    loadClassAnnouncements(false);
+  });
+
   safeAddListener("backToHomeBtn1", "click", () => popScreen());
   safeAddListener("backToHomeBtn2", "click", () => popScreen());
+  safeAddListener("backToHomeBtn3", "click", () => popScreen());
   
   safeAddListener("refreshClassQuestionsBtn", "click", () => loadClassQuestions(false));
   safeAddListener("refreshMyQuestionsBtn", "click", () => loadMyQuestions(false));
+  safeAddListener("refreshAnnouncementsBtn", "click", () => loadClassAnnouncements(false));
+
+  safeAddListener("announcementsLoadMore", "click", () => {
+    announcementsOffset += announcementsLimit;
+    loadClassAnnouncements(true);
+  });
   
   safeAddListener("backToMyQuestionsBtn", "click", () => popScreen());
   safeAddListener("cancelAnswerBtn", "click", () => popScreen());
@@ -882,8 +915,9 @@ async function loadStudentInfo() {
       const urlParams = new URLSearchParams(window.location.search);
       const focusQuestionId = urlParams.get("focusQuestion");
       const focusAnswerId = urlParams.get("focusAnswer");
+      const focusAnnouncementId = urlParams.get("focusAnnouncement");
       const targetTab = urlParams.get("tab");
-      console.log(`[Init] targetTab query param is: "${targetTab || 'none'}" | focusQuestion is: "${focusQuestionId || 'none'}" | focusAnswer is: "${focusAnswerId || 'none'}"`);
+      console.log(`[Init] targetTab query param is: "${targetTab || 'none'}" | focusQuestion is: "${focusQuestionId || 'none'}" | focusAnswer is: "${focusAnswerId || 'none'}" | focusAnnouncement is: "${focusAnnouncementId || 'none'}"`);
       
       if (focusQuestionId) {
         chrome.runtime.sendMessage({
@@ -908,6 +942,9 @@ async function loadStudentInfo() {
             console.error("[Init] Failed to fetch focused question details:", focusQuestionId);
           }
         });
+      } else if (focusAnnouncementId) {
+        pushScreen("announcementsScreen");
+        loadClassAnnouncements(false, focusAnnouncementId);
       } else if (targetTab === "classQuestions") {
         pushScreen("classQuestionsScreen");
         loadClassQuestions(false);
@@ -991,6 +1028,109 @@ document.addEventListener("DOMContentLoaded", async () => {
           });
         });
       }
+    } else if (message && message.type === 'navigate_to_announcement') {
+      console.log('[Dashboard Router] Dynamic announcement navigation requested:', message);
+      const focusAnnId = message.focusAnnouncement;
+      if (focusAnnId) {
+        pushScreen("announcementsScreen");
+        loadClassAnnouncements(false, focusAnnId);
+      }
     }
   });
+
+  let announcementsOffset = 0;
+  const announcementsLimit = 5;
+
+  async function loadClassAnnouncements(append = false, focusId = null) {
+    if (!append) {
+      announcementsOffset = 0;
+      const listEl = $("announcementsList");
+      if (listEl) listEl.innerHTML = "<p style='color: #7f8c8d; font-style: italic;'>Loading announcements...</p>";
+    }
+    
+    try {
+      const data = await chrome.storage.local.get('studentInfo');
+      const studentInfo = data.studentInfo || {};
+      const classCode = String(studentInfo.classCode || '').trim();
+      
+      if (!classCode) {
+        const listEl = $("announcementsList");
+        if (listEl) listEl.innerHTML = "<p style='color: #ef4444; font-weight: bold;'>Error: Class Code is missing. Please connect to a class first.</p>";
+        return;
+      }
+      
+      const response = await chrome.runtime.sendMessage({
+        type: "fetchAnnouncements",
+        classCode,
+        limit: announcementsLimit,
+        offset: announcementsOffset
+      });
+      
+      const listEl = $("announcementsList");
+      if (!listEl) return;
+      
+      const temps = listEl.querySelectorAll('.loading-more-temp');
+      temps.forEach(t => t.remove());
+      
+      if (!append) {
+        listEl.innerHTML = "";
+      }
+      
+      const list = response?.announcements || [];
+      if (list.length === 0 && !append) {
+        listEl.innerHTML = "<p style='color: #7f8c8d; font-style: italic;'>No announcements received in the last 24 hours.</p>";
+        setHidden($("announcementsLoadMore"), true);
+        return;
+      }
+      
+      list.forEach(ann => {
+        const item = document.createElement("div");
+        item.className = "detail-card";
+        
+        const isFocused = focusId && String(ann.id) === String(focusId);
+        const cardStyle = isFocused 
+          ? "border: 2px solid var(--secondary); background: #f0f9ff; transform: scale(1.02); transition: all 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.08);"
+          : "border: 1px solid #e1e8ed; background: white;";
+        item.style.cssText = cardStyle + " border-radius: 8px; padding: 15px; margin-bottom: 10px; text-align: left;";
+        
+        let createdDate = 'Recent';
+        if (ann.createdAt) {
+          if (typeof ann.createdAt === 'string') {
+            createdDate = new Date(ann.createdAt).toLocaleString();
+          } else if (ann.createdAt.seconds) {
+            createdDate = new Date(ann.createdAt.seconds * 1000).toLocaleString();
+          }
+        }
+        
+        const desc = ann.description || ann.message || '';
+        item.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+            <h4 style="margin: 0; color: #2c3e50; font-size: 16px;">📌 ${escapeHtml(ann.title || 'Announcement')}</h4>
+            <span style="font-size: 12px; color: #7f8c8d;">${createdDate}</span>
+          </div>
+          <p style="margin: 0 0 8px 0; font-size: 14px; color: #555; white-space: pre-wrap; word-break: break-word;">${escapeHtml(desc)}</p>
+          <div style="font-size: 12px; color: #95a5a6;">By Teacher: <strong>${escapeHtml(ann.teacherName || 'Instructor')}</strong></div>
+        `;
+        listEl.appendChild(item);
+        
+        if (isFocused) {
+          setTimeout(() => {
+            item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 150);
+        }
+      });
+      
+      if (list.length === announcementsLimit) {
+        setHidden($("announcementsLoadMore"), false);
+      } else {
+        setHidden($("announcementsLoadMore"), true);
+      }
+    } catch (error) {
+      console.error("[Dashboard] Error loading class announcements:", error);
+      const listEl = $("announcementsList");
+      if (listEl && !append) {
+        listEl.innerHTML = "<p style='color: #ef4444; font-style: italic;'>Error loading announcements.</p>";
+      }
+    }
+  }
 })();

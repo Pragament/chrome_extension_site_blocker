@@ -693,13 +693,22 @@ async function dbAskClassQuestionFirestore(payload) {
   const json = await res.json();
   const nameParts = json.name.split('/');
   const questionId = nameParts[nameParts.length - 1];
+
   return { success: true, questionId };
 }
 
 async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
-  if (!self.CONFIG || !self.CONFIG.FIREBASE) return [];
+  const currentTime = new Date().toISOString();
+  const twentyFourHoursAgoIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  console.log(`[Class Questions Query] classCode: "${classCode}", currentTime: "${currentTime}", cutoffTime: "${twentyFourHoursAgoIso}"`);
+
+  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
+    return { success: false, error: "Missing Firebase configuration.", errorType: "Config missing" };
+  }
   const accessToken = await getFirebaseAccessToken();
-  if (!accessToken) return [];
+  if (!accessToken) {
+    return { success: false, error: "Unable to authenticate with Firebase.", errorType: "Authentication failed" };
+  }
   const projectId = self.CONFIG.FIREBASE.projectId;
   const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
 
@@ -723,51 +732,77 @@ async function dbFetchOpenQuestions(classCode, limit = 10, offset = 0) {
                 op: "EQUAL",
                 value: { stringValue: "Open" }
               }
+            },
+            {
+              fieldFilter: {
+                field: { fieldPath: "createdTime" },
+                op: "GREATER_THAN_OR_EQUAL",
+                value: { timestampValue: twentyFourHoursAgoIso }
+              }
             }
           ]
         }
-      }
+      },
+      orderBy: [
+        {
+          field: { fieldPath: "createdTime" },
+          direction: "DESCENDING"
+        }
+      ],
+      limit: limit
     }
   };
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`
-    },
-    body: JSON.stringify(queryPayload)
-  });
-
-  if (!res.ok) {
-    console.warn('[dbFetchOpenQuestions] Firestore query failed', res.status);
-    return [];
-  }
-
-  const data = await res.json();
-  let questions = [];
-  if (Array.isArray(data)) {
-    data.forEach(item => {
-      if (item.document) {
-        const doc = item.document;
-        const fields = firestoreFieldsToJs(doc.fields);
-        const nameParts = doc.name.split('/');
-        const id = nameParts[nameParts.length - 1];
-        questions.push({ id, ...fields });
-      }
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(queryPayload)
     });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('[dbFetchOpenQuestions] Firestore query failed with status', res.status, 'Error:', errorText);
+      let errorType = "Query failed";
+      if (res.status === 400 && errorText.includes("index")) {
+        errorType = "Missing index";
+      } else if (res.status === 403) {
+        errorType = "Permission denied";
+      }
+      return { success: false, error: errorText, errorType: errorType };
+    }
+
+    const data = await res.json();
+    let questions = [];
+    if (Array.isArray(data)) {
+      data.forEach(item => {
+        if (item.document) {
+          const doc = item.document;
+          const fields = firestoreFieldsToJs(doc.fields);
+          const nameParts = doc.name.split('/');
+          const id = nameParts[nameParts.length - 1];
+          questions.push({ id, ...fields });
+        }
+      });
+    }
+
+    // Filter in-memory for Open status
+    questions = questions.filter(q => q.status === 'Open');
+
+    questions.sort((a, b) => {
+      const timeA = a.createdAt || a.createdTime || 0;
+      const timeB = b.createdAt || b.createdTime || 0;
+      return new Date(timeB) - new Date(timeA);
+    });
+
+    return { success: true, questions: questions.slice(offset, offset + limit) };
+  } catch (error) {
+    console.error('[dbFetchOpenQuestions] Exception during query:', error);
+    return { success: false, error: error.message, errorType: "Exception" };
   }
-
-  // Filter in-memory for Open status
-  questions = questions.filter(q => q.status === 'Open');
-
-  questions.sort((a, b) => {
-    const timeA = a.createdAt || a.createdTime || 0;
-    const timeB = b.createdAt || b.createdTime || 0;
-    return new Date(timeB) - new Date(timeA);
-  });
-
-  return questions.slice(offset, offset + limit);
 }
 
 async function dbSubmitAnswerFirestore(payload) {
@@ -876,9 +911,17 @@ async function dbSubmitAnswer(payload) {
 }
 
 async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0) {
-  if (!self.CONFIG || !self.CONFIG.FIREBASE) return [];
+  const currentTime = new Date().toISOString();
+  const twentyFourHoursAgoIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  console.log(`[My Questions Query] classCode: "${classCode}", rollNumber: "${rollNumber}", currentTime: "${currentTime}", cutoffTime: "${twentyFourHoursAgoIso}"`);
+
+  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
+    return { success: false, error: "Missing Firebase configuration.", errorType: "Config missing" };
+  }
   const accessToken = await getFirebaseAccessToken();
-  if (!accessToken) return [];
+  if (!accessToken) {
+    return { success: false, error: "Unable to authenticate with Firebase.", errorType: "Authentication failed" };
+  }
   const projectId = self.CONFIG.FIREBASE.projectId;
   const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
 
@@ -924,51 +967,164 @@ async function dbFetchMyQuestions(classCode, rollNumber, limit = 10, offset = 0)
                 value: { stringValue: classCode }
               }
             },
-            rollFilter
+            rollFilter,
+            {
+              fieldFilter: {
+                field: { fieldPath: "createdTime" },
+                op: "GREATER_THAN_OR_EQUAL",
+                value: { timestampValue: twentyFourHoursAgoIso }
+              }
+            }
           ]
         }
-      }
+      },
+      orderBy: [
+        {
+          field: { fieldPath: "createdTime" },
+          direction: "DESCENDING"
+        }
+      ],
+      limit: limit,
+      offset: offset
     }
   };
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`
-    },
-    body: JSON.stringify(queryPayload)
-  });
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(queryPayload)
+    });
 
-  if (!res.ok) {
-    console.warn('[dbFetchMyQuestions] Firestore query failed', res.status);
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('[dbFetchMyQuestions] Firestore query failed with status', res.status, 'Error:', errorText);
+      let errorType = "Query failed";
+      if (res.status === 400 && errorText.includes("index")) {
+        errorType = "Missing index";
+      } else if (res.status === 403) {
+        errorType = "Permission denied";
+      }
+      return { success: false, error: errorText, errorType: errorType };
+    }
+
+    const data = await res.json();
+    let questions = [];
+    if (Array.isArray(data)) {
+      data.forEach(item => {
+        if (item.document) {
+          const doc = item.document;
+          const fields = firestoreFieldsToJs(doc.fields);
+          const nameParts = doc.name.split('/');
+          const id = nameParts[nameParts.length - 1];
+          questions.push({ id, ...fields });
+        }
+      });
+    }
+
+    // Filter in-memory for my questions supporting multi-student roll number login
+    questions = questions.filter(q => rollNumbers.includes(String(q.rollNumber).trim()));
+
+    return { success: true, questions: questions };
+  } catch (error) {
+    console.error('[dbFetchMyQuestions] Exception during query:', error);
+    return { success: false, error: error.message, errorType: "Exception" };
+  }
+}
+
+async function dbFetchAnnouncements(classCode, limit = 5, offset = 0) {
+  console.log(`[Student Query Request] Fetching announcements for classCode: ${classCode}, limit: ${limit}, offset: ${offset}`);
+  if (!self.CONFIG || !self.CONFIG.FIREBASE) {
+    console.error("[dbFetchAnnouncements] Missing CONFIG.FIREBASE");
     return [];
   }
-
-  const data = await res.json();
-  let questions = [];
-  if (Array.isArray(data)) {
-    data.forEach(item => {
-      if (item.document) {
-        const doc = item.document;
-        const fields = firestoreFieldsToJs(doc.fields);
-        const nameParts = doc.name.split('/');
-        const id = nameParts[nameParts.length - 1];
-        questions.push({ id, ...fields });
-      }
-    });
+  const accessToken = await getFirebaseAccessToken();
+  if (!accessToken) {
+    console.error("[dbFetchAnnouncements] Failed to obtain Firebase access token");
+    return [];
   }
+  const projectId = self.CONFIG.FIREBASE.projectId;
+  const endpoint = `${self.CONFIG.FIREBASE.rest.firestoreBase}/projects/${projectId}/databases/(default)/documents:runQuery`;
 
-  // Filter in-memory for my questions supporting multi-student roll number login
-  questions = questions.filter(q => rollNumbers.includes(String(q.rollNumber).trim()));
+  const twentyFourHoursAgoIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  questions.sort((a, b) => {
-    const timeA = a.createdAt || a.createdTime || 0;
-    const timeB = b.createdAt || b.createdTime || 0;
-    return new Date(timeB) - new Date(timeA);
-  });
+  const queryPayload = {
+    structuredQuery: {
+      from: [{ collectionId: "announcements" }],
+      where: {
+        compositeFilter: {
+          op: "AND",
+          filters: [
+            {
+              fieldFilter: {
+                field: { fieldPath: "classCode" },
+                op: "EQUAL",
+                value: { stringValue: classCode }
+              }
+            },
+            {
+              fieldFilter: {
+                field: { fieldPath: "createdAt" },
+                op: "GREATER_THAN_OR_EQUAL",
+                value: { timestampValue: twentyFourHoursAgoIso }
+              }
+            }
+          ]
+        }
+      },
+      orderBy: [
+        {
+          field: { fieldPath: "createdAt" },
+          direction: "DESCENDING"
+        }
+      ],
+      limit: limit,
+      offset: offset
+    }
+  };
 
-  return questions.slice(offset, offset + limit);
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(queryPayload)
+    });
+
+    console.log(`[Student Query Request] Firestore response status code: ${res.status}`);
+    const responseText = await res.text();
+    console.log(`[Firestore Query Response] Raw body: ${responseText}`);
+
+    if (!res.ok) {
+      console.error(`[Firestore Query Error] Status ${res.status}: ${responseText}`);
+      return [];
+    }
+
+    const data = JSON.parse(responseText);
+    const announcements = [];
+    if (Array.isArray(data)) {
+      data.forEach(item => {
+        if (item.document) {
+          const doc = item.document;
+          const fields = firestoreFieldsToJs(doc.fields);
+          const nameParts = doc.name.split('/');
+          const id = nameParts[nameParts.length - 1];
+          announcements.push({ id, ...fields });
+        }
+      });
+    }
+
+    console.log(`[Firestore Query Success] Number of announcements returned: ${announcements.length}`);
+    return announcements;
+  } catch (error) {
+    console.error("[Firestore Query Exception] Error during fetch:", error);
+    return [];
+  }
 }
 
 async function dbFetchQuestionResponses(questionId, limit = 10, offset = 0) {
@@ -1187,13 +1343,9 @@ async function getCombinedWhitelist() {
   // Get student's class code and fetch their class wishlist
   const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
   if (studentInfo.classCode) {
-    // Check cache first (valid for 5 minutes)
     const { classWishlistCache } = await chrome.storage.local.get('classWishlistCache');
-    const now = Date.now();
-
     if (classWishlistCache &&
-      classWishlistCache.classCode === studentInfo.classCode &&
-      classWishlistCache.timestamp > now - 5 * 60 * 1000) {
+      classWishlistCache.classCode === studentInfo.classCode) {
       // Use cached wishlist
       console.log('[getCombinedWhitelist] Using cached wishlist');
       combined = [...combined, ...classWishlistCache.wishlist];
@@ -1668,8 +1820,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const classCode = String(message.classCode || '').trim();
       const limit = Number(message.limit || 10);
       const offset = Number(message.offset || 0);
-      const questions = await dbFetchOpenQuestions(classCode, limit, offset);
-      sendResponse({ success: true, questions });
+      dbFetchOpenQuestions(classCode, limit, offset).then(sendResponse);
+      return true; // Keep message channel open for async response
     } else if (message && message.type === "submitAnswer") {
       const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
       const classCode = String(studentInfo.classCode || '').trim();
@@ -1693,8 +1845,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const rollNumber = String(message.rollNumber || '').trim();
       const limit = Number(message.limit || 10);
       const offset = Number(message.offset || 0);
-      const questions = await dbFetchMyQuestions(classCode, rollNumber, limit, offset);
-      sendResponse({ success: true, questions });
+      dbFetchMyQuestions(classCode, rollNumber, limit, offset).then(sendResponse);
+      return true; // Keep message channel open for async response
+    } else if (message && message.type === "fetchAnnouncements") {
+      const classCode = String(message.classCode || '').trim();
+      const limit = Number(message.limit || 5);
+      const offset = Number(message.offset || 0);
+      const announcements = await dbFetchAnnouncements(classCode, limit, offset);
+      sendResponse({ success: true, announcements });
     } else if (message && message.type === "fetchQuestionResponses") {
       const questionId = String(message.questionId || '').trim();
       const limit = Number(message.limit || 10);
@@ -1715,27 +1873,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tabName = message.tab;
       const focusQuestion = message.focusQuestion;
       const focusAnswer = message.focusAnswer;
+      const focusAnnouncement = message.focusAnnouncement;
       
       let params = [];
       if (tabName) params.push(`tab=${encodeURIComponent(tabName)}`);
       if (focusQuestion) params.push(`focusQuestion=${encodeURIComponent(focusQuestion)}`);
       if (focusAnswer) params.push(`focusAnswer=${encodeURIComponent(focusAnswer)}`);
+      if (focusAnnouncement) params.push(`focusAnnouncement=${encodeURIComponent(focusAnnouncement)}`);
       
-      const targetUrl = chrome.runtime.getURL('student_dashboard.html' + (params.length > 0 ? '?' + params.join('&') : ''));
+      const targetPage = focusAnnouncement ? 'homepage.html' : 'student_dashboard.html';
+      const targetUrl = chrome.runtime.getURL(targetPage + (params.length > 0 ? '?' + params.join('&') : ''));
       
       chrome.tabs.query({}, (tabs) => {
-        const existingTab = tabs.find(tab => tab.url && tab.url.includes('student_dashboard.html'));
+        const existingTab = tabs.find(tab => tab.url && tab.url.includes(targetPage));
         if (existingTab) {
           chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, (updatedTab) => {
             if (updatedTab) {
               chrome.windows.update(updatedTab.windowId, { drawAttention: true, focused: true });
               // Trigger immediate dynamic navigation
               setTimeout(() => {
-                chrome.tabs.sendMessage(existingTab.id, {
-                  type: 'navigate_to_question',
-                  focusQuestion: focusQuestion,
-                  focusAnswer: focusAnswer
-                }).catch(() => {});
+                if (focusAnnouncement) {
+                  chrome.tabs.sendMessage(existingTab.id, {
+                    type: 'navigate_to_announcement',
+                    focusAnnouncement: focusAnnouncement
+                  }).catch(() => {});
+                } else {
+                  chrome.tabs.sendMessage(existingTab.id, {
+                    type: 'navigate_to_question',
+                    focusQuestion: focusQuestion,
+                    focusAnswer: focusAnswer
+                  }).catch(() => {});
+                }
               }, 300);
             }
           });
@@ -1953,6 +2121,12 @@ async function handleIncomingPushData(data) {
 
   const { studentInfo = {} } = await chrome.storage.local.get('studentInfo');
   
+  // Strict classCode enforcement (extra security check)
+  if (data.classCode && String(data.classCode).trim() !== String(studentInfo.classCode || '').trim()) {
+    console.log(`[FCM Service Worker] Suppressing notification: student's classCode (${studentInfo.classCode}) does not match notification classCode (${data.classCode}).`);
+    return;
+  }
+
   // Exclude notifying yourself if you are the original action triggerer
   if (data.type === 'new_question') {
     if (data.rollNumber && String(data.rollNumber) === String(studentInfo.rollNumber)) {
@@ -1991,6 +2165,9 @@ async function handleIncomingPushData(data) {
   } else if (data.type === 'answer_notification') {
     notificationTitle = 'New Solution Received';
     notificationBody = `Roll No. ${data.solverRollNumber || 'unknown'} submitted a solution for your question.`;
+  } else if (data.type === 'announcement') {
+    notificationTitle = '📢 New Announcement';
+    notificationBody = `${data.teacherName || 'Teacher'} posted a new announcement: ${data.title || ''}`;
   } else {
     // Fallback message composition
     notificationTitle = data.title || '📢 New Class Question';
@@ -2066,7 +2243,7 @@ async function handleIncomingPushData(data) {
   
   const notificationId = data.type === 'answer_notification' 
     ? `${data.questionId}|${data.answerId}` 
-    : String(data.questionId || 'fcm_alert_' + Date.now());
+    : (data.type === 'announcement' ? `announcement|${data.announcementId}` : String(data.questionId || 'fcm_alert_' + Date.now()));
   
   // Await the creation of the notification to prevent service worker premature termination
   await new Promise((resolve) => {
@@ -2099,6 +2276,40 @@ async function handleIncomingPushData(data) {
 async function handleNotificationClick(notificationId) {
   console.log('[FCM Service Worker] Handling click for notification ID:', notificationId);
   
+  if (notificationId && notificationId.startsWith('announcement|')) {
+    const announcementId = notificationId.split('|')[1];
+    let targetUrl = chrome.runtime.getURL('homepage.html');
+    if (announcementId) {
+      targetUrl += `?focusAnnouncement=${encodeURIComponent(announcementId)}`;
+    }
+    
+    await new Promise((resolve) => {
+      chrome.tabs.query({}, (tabs) => {
+        const existingTab = tabs.find(tab => tab.url && tab.url.includes('homepage.html'));
+        if (existingTab) {
+          chrome.tabs.update(existingTab.id, { url: targetUrl, active: true }, (updatedTab) => {
+            if (updatedTab) {
+              chrome.windows.update(updatedTab.windowId, { drawAttention: true, focused: true });
+              // Trigger immediate dynamic navigation
+              setTimeout(() => {
+                chrome.tabs.sendMessage(existingTab.id, {
+                  type: 'navigate_to_announcement',
+                  focusAnnouncement: announcementId
+                }).catch(() => {});
+              }, 300);
+            }
+            resolve();
+          });
+        } else {
+          chrome.tabs.create({ url: targetUrl }, () => {
+            resolve();
+          });
+        }
+      });
+    });
+    return;
+  }
+
   let questionId = notificationId;
   let answerId = '';
   if (notificationId && notificationId.includes('|')) {

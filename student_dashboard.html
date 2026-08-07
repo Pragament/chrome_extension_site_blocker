@@ -267,6 +267,7 @@
     <div class="button-group" style="flex-direction: column; gap: 15px; margin-top: 30px;">
       <button id="goToClassQuestionsBtn" class="btn" style="padding: 15px; font-size: 16px; width: 100%;">Class Questions</button>
       <button id="goToMyQuestionsBtn" class="btn" style="padding: 15px; font-size: 16px; width: 100%;">My Questions</button>
+      <button id="goToAnnouncementsBtn" class="btn" style="padding: 15px; font-size: 16px; width: 100%;">📢 Teacher Announcements</button>
     </div>
   </div>
 
@@ -411,6 +412,22 @@
       <button id="backToAnswersListBtn2" class="btn btn-secondary">Back</button>
     </div>
     <div id="viewerStatus" class="success-message hidden" style="margin-top: 10px;"></div>
+  </div>
+
+  <!-- Screen 7: Announcements Screen -->
+  <div id="announcementsScreen" class="container dashboard-container hidden">
+    <div class="dashboard-header">
+      <h2>📢 Teacher Announcements</h2>
+      <div>
+        <button id="backToHomeBtn3" class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;">← Back</button>
+      </div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <h3 style="margin: 0; color: #34495e;">Latest Announcements</h3>
+      <button id="refreshAnnouncementsBtn" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Refresh</button>
+    </div>
+    <div id="announcementsList" style="display: flex; flex-direction: column; gap: 10px;"></div>
+    <button id="announcementsLoadMore" class="load-more-btn hidden" style="background-color: #3498db;">View All</button>
   </div>
 
   <script src="config.js"></script>
